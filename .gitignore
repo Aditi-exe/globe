@@ -1,0 +1,22 @@
+# Build output
+/build/
+/out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+
+# Fetched dependencies / package managers (if used later)
+/vcpkg_installed/
+_deps/
+
+# IDE
+/.idea/
+*.user
+
+# OS cruft
+Thumbs.db
+.DS_Store
+
+# Downloaded assets that shouldn't be committed (large imagery, etc.)
+# Keep this list in sync with assets/ decisions in PLAN.md.

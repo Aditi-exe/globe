@@ -1,0 +1,368 @@
+# Globe — Satellite Visualizer: Architecture & Plan
+
+> A native (C++/OpenGL) real-time satellite visualizer. Fetches orbital data
+> from a public source, propagates it locally, and renders satellites over a
+> 3D Earth with info panels, ground tracks, and pass predictions based on the
+> user's location. Distributed as a downloadable on GitHub, with a static
+> download page later.
+
+**Status:** Planning. Design is intentionally **open for review** — sections
+marked 🔵 *OPEN FOR REVIEW* are deliberate decisions we expect to revisit.
+Items marked ✅ were resolved in the 2026-10-27 review.
+
+_Last updated: 2026-10-27_
+
+---
+
+## 1. Goals & non-goals
+
+### Goals
+- Native desktop app, **Windows-first**, code kept portable for later Mac/Linux.
+- **Real-time** satellite positions computed **locally** (no mandatory server).
+- 3D textured Earth with live satellite markers.
+- Click a satellite → info panel (name, NORAD ID, country, type, live lat/lon/alt/velocity).
+- Ground tracks / orbit paths for selected satellites.
+- "Overhead now" + upcoming **pass predictions** from the user's location.
+- A curated set of **major satellites rendered on the globe**; the full set
+  browsable in a **searchable list/menu**.
+- Ship as a **GitHub Release** download; add a **GitHub Pages** site later.
+- **$0 recurring infrastructure** for v1 — no cloud database, no always-on server.
+
+### Non-goals (v1)
+- Web-first / browser version.
+- User accounts, cloud sync, server-side history.
+- Rendering every one of the ~10,000 active objects as 3D markers.
+- A remote computation backend (kept *possible* via a seam, but not built).
+
+---
+
+## 2. Locked decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Platform (v1) | **Windows-first**, portable code | Matches dev machine; simplest to sign/distribute. |
+| Computation | **Local** (SGP4 on client) | SGP4 is lightweight; avoids an always-on server + recurring cost. |
+| Rendering API | **OpenGL 3.3 core** | Portable, well-documented, Mac-compatible ceiling (4.1). |
+| Windowing/input | **GLFW** | Cross-platform, minimal, standard. |
+| GL loader | **GLAD** | Standard, generated for 3.3 core. |
+| Math | **GLM** | Matches GLSL conventions. |
+| Orbit propagation | **libsgp4** (D. Warner) | Battle-tested SGP4/SDP4; confirm license on vendored build. |
+| HTTP client | **cpr** (wraps libcurl) | Clean API; libcurl is the portable workhorse. |
+| JSON parsing | **nlohmann/json** | Header-only, ergonomic. |
+| Local storage | **SQLite** (embedded) + plain files | Zero-server structured local storage. |
+| Data source (v1) | **CelesTrak** | Free, no API key, grouped TLE/JSON feeds. |
+| UI | **Custom OpenGL UI** | User preference for a bespoke look. ⚠️ See §8 risk note. |
+| Distribution | **GitHub Releases** + later **GitHub Pages** | Free binary + static hosting. |
+| Database (cloud) | **None** | No stateful server features in scope. |
+
+---
+
+## 3. Data model & sources
+
+### 3.1 What the data actually is
+- **TLE (Two-Line Element set):** compact orbital elements per object, published
+  by CelesTrak, refreshed ~daily. **Not a position** — you *propagate* it with
+  SGP4 to get a position at any instant. "Real-time" = periodic TLE refresh +
+  continuous local propagation.
+- **SATCAT metadata:** name, NORAD catalog ID, country, launch date, object
+  type, orbit class. Used for the info panel and the browsable list.
+
+### 3.2 Sources (v1)
+- **TLEs:** CelesTrak grouped feeds (e.g. `stations`, `starlink`, `gps-ops`,
+  `active`) in JSON or 3LE format.
+- **SATCAT:** CelesTrak SATCAT CSV/JSON.
+- No API key required. **Respect CelesTrak fair-use / rate limits** — fetch on a
+  throttled schedule and cache; never poll tightly.
+
+### 3.3 Refresh & cache policy ✅ (window = 6h)
+**Important:** the refresh window is **not** how fresh the positions are. A TLE
+is an orbital *description*, not a position — SGP4 always propagates it to the
+**current instant**, so a 6h-old (even days-old) TLE still yields an accurate
+*right-now* position. The window only governs **how often we re-download** the
+TLE file, as a politeness/bandwidth throttle against CelesTrak.
+
+- TLEs re-downloaded when older than **6h**, or on explicit user refresh.
+- On open: use cache immediately if present (positions propagated to `now`),
+  fetch in the background if stale; fetch synchronously only if cache is empty.
+- Cache to local disk so the app opens instantly and works briefly offline.
+- SATCAT refreshed less often (weekly-ish) — it changes slowly.
+
+---
+
+## 4. High-level architecture
+
+Layered, with a hard seam between *where data comes from* and *everything else*,
+so local-vs-remote never leaks into the renderer.
+
+```
+                 ┌─────────────────────────────────────────────┐
+                 │                  App / main loop             │
+                 │  (window, timing, event dispatch, state)     │
+                 └───────────────┬───────────────┬─────────────┘
+                                 │               │
+                 ┌───────────────▼────┐   ┌──────▼──────────────┐
+                 │   Domain / Engine  │   │   Presentation      │
+                 │                    │   │                     │
+                 │  SatelliteCatalog  │   │  Renderer (OpenGL)  │
+                 │  Propagator (SGP4) │   │   - Earth sphere    │
+                 │  Observer/Location │   │   - Sat markers     │
+                 │  PassPredictor     │   │   - Ground tracks   │
+                 │  CoordTransforms   │   │  UI (custom OpenGL)  │
+                 └─────────┬──────────┘   └─────────────────────┘
+                           │
+                 ┌─────────▼───────────────────────────────┐
+                 │   Data access (the SEAM)                 │
+                 │   ITleProvider  /  ISatcatProvider       │
+                 │     ├── CelestrakProvider  (v1, HTTP)    │
+                 │     └── RemoteProvider      (stub/later) │
+                 │   Cache (disk) + Store (SQLite)          │
+                 └──────────────────────────────────────────┘
+```
+
+### Data flow (one frame / tick)
+1. On startup + every N hours: provider fetches TLEs (HTTP) → cache/store.
+2. Each tick: `Propagator` runs SGP4 for tracked satellites at `now` → ECI.
+3. `CoordTransforms` → ECEF → geodetic (lat/lon/alt) for the globe, and
+   az/el relative to the `Observer` for overhead/pass logic.
+4. `Renderer` draws Earth, the curated visible markers, and selected tracks.
+5. `UI` draws panels (info, list/search, controls) and routes input.
+
+---
+
+## 5. Module breakdown
+
+| Module | Responsibility | Key types |
+|---|---|---|
+| `platform/` | Window, GL context, input, timing | `Window`, `Clock`, `Input` |
+| `data/` | The seam + fetching + caching | `ITleProvider`, `CelestrakProvider`, `RemoteProvider` (stub), `ISatcatProvider`, `Cache`, `Store` (SQLite) |
+| `domain/` | Orbital model & math | `TleSet`, `Satellite`, `SatelliteCatalog`, `Propagator` (SGP4), `CoordTransforms`, `Observer`, `PassPredictor` |
+| `render/` | OpenGL drawing | `Renderer`, `EarthSphere`, `MarkerBatch`, `TrackRenderer`, `Camera`, `Shader`, `Texture` |
+| `ui/` | Custom OpenGL UI | `UiContext`, `TextRenderer`, `Panel`, `ListView`, `Button`, `SearchBox` |
+| `app/` | Glue, state machine, config | `App`, `AppState`, `Config`, `Selection` |
+
+### 5.1 The seam (why it matters)
+```cpp
+struct SatelliteState { /* id, eci pos/vel, timestamp */ };
+
+class ITleProvider {
+public:
+    virtual ~ITleProvider() = default;
+    virtual std::vector<TleSet> fetchGroup(std::string_view group) = 0;
+    virtual bool isStale() const = 0;
+};
+```
+- v1 ships `CelestrakProvider` (HTTP + SGP4 locally).
+- `RemoteProvider` is a **stub** — if we ever want remote compute, we implement
+  this one class and the renderer/UI never change.
+
+---
+
+## 6. Rendering plan (OpenGL 3.3 core)
+
+- **Earth:** UV sphere mesh, textured with a public-domain **NASA Blue Marble**
+  image (day map v1; optional night/clouds/specular later). Lat/lon grid optional.
+- **Camera:** orbit/trackball camera (drag to rotate, scroll to zoom).
+- **Satellite markers:** curated visible subset drawn as point sprites /
+  instanced quads. Positions updated each tick from the propagator.
+  ✅ **Visible subset (v1):** ISS/stations + GPS + a Starlink sample rendered on
+  the globe; the full set lives in the searchable list (§5/§13). Marker style
+  🔵 OPEN FOR REVIEW.
+- **Ground tracks:** polyline of sub-satellite points (past + future arc) for
+  the selected satellite; optional 3D orbit ellipse.
+- **Selection:** ray-pick from cursor → nearest marker within a threshold.
+- **Render order:** Earth → tracks → markers → UI (UI last, depth test off).
+
+---
+
+## 7. Orbital math pipeline
+
+1. **Input:** TLE + timestamp.
+2. **SGP4 (libsgp4):** → position/velocity in **ECI** (TEME frame).
+3. **ECI → ECEF:** rotate by GMST (sidereal time) for the timestamp.
+4. **ECEF → geodetic:** lat/lon/alt for placing markers on the globe.
+5. **Observer look angles:** ECEF sat + ECEF observer → **azimuth/elevation**
+   for "overhead now" and pass predictions. ✅ Observer location comes from
+   **both** manual lat/lon entry **and** IP-based auto-detection (auto on first
+   run, manually overridable). IP geolocation needs a keyless/low-friction
+   lookup service — 🔵 pick the specific endpoint when we build §Phase 5.
+6. **Pass prediction:** step time forward, find elevation rising above a
+   threshold (e.g. 10°) → AOS/LOS/max-elevation windows.
+
+> libsgp4 provides SGP4 + several of these transforms; we wrap them so the rest
+> of the code is frame-agnostic.
+
+---
+
+## 8. Custom UI — plan & risk ⚠️
+
+**User chose a custom OpenGL UI for a bespoke look. This is the biggest
+complexity/schedule risk in the project** and a very common place to get stuck,
+because a custom UI means we own:
+- **Text rendering** (glyph atlas via **stb_truetype** or **FreeType**),
+- **Input/event handling** (hover, click, focus, scroll, text entry),
+- **Layout** (panels, lists, scrolling, z-order),
+- **Theming** (the actual "fancy" styling).
+
+### Plan
+- Build a **small immediate-mode-style toolkit** scoped to exactly what we need:
+  one info panel, a scrollable searchable list, a few buttons/toggles, a time
+  control. No general-purpose UI framework ambitions.
+- Start with **stb_truetype** for a single-font glyph atlas; upgrade to FreeType
+  only if we need crisp multi-size/hinted text.
+
+### 🔵 OPEN FOR REVIEW — fallback kept in pocket
+If the custom UI starts eating the schedule, the fallback is **Dear ImGui** for
+panels (functional, cross-platform, battle-tested) while the **3D globe stays
+fully custom** — the globe is the "fancy" part and is unaffected by the UI
+choice. We decide this at the Phase 3 review, not now.
+
+---
+
+## 9. Proposed project structure
+
+```
+globe/
+├── CMakeLists.txt             # FetchContent: glfw/glm/glad (deps at build time)
+├── PLAN.md                    # this file
+├── README.md
+├── LICENSE                    # e.g. MIT (TBD §12)
+├── assets/
+│   ├── textures/earth_day.jpg # NASA Blue Marble (public domain)
+│   ├── shaders/*.vert|*.frag
+│   └── fonts/*.ttf
+├── src/
+│   ├── main.cpp
+│   ├── platform/              # Window, Input, Clock
+│   ├── data/                  # ITleProvider, CelestrakProvider, Cache, Store
+│   ├── domain/                # Propagator, CoordTransforms, Observer, PassPredictor
+│   ├── render/                # Renderer, EarthSphere, MarkerBatch, TrackRenderer, Camera
+│   ├── ui/                    # custom UI toolkit
+│   └── app/                   # App, Config, AppState
+├── third_party/               # libsgp4 (vendored) if not via package mgr
+├── tests/                     # unit tests (propagation correctness, transforms)
+└── .github/workflows/         # CI (build + release) later
+```
+
+---
+
+## 10. Build & dependencies
+
+- **CMake** (CLion-native) + **FetchContent** — deps are fetched & built at
+  configure time; **no system install needed** (nothing added outside the build
+  dir). ✅ *Changed from the original vcpkg plan:* vcpkg wasn't installed and we
+  preferred not to add a system-wide tool. vcpkg remains an option later if we
+  want prebuilt binary packages. Requires network on first configure + Python 3
+  (GLAD generates its loader).
+- Phase 0 deps (in `CMakeLists.txt`): `glfw` 3.4, `glm` 1.0.1, `glad` 2.0.6
+  (GL 3.3 core). Later phases add: `cpr` (→ libcurl), `nlohmann-json`,
+  `sqlite3`, `stb` (truetype/image); and `freetype` if the custom UI needs it.
+- `libsgp4`: vendored in `third_party/` or via FetchContent — **confirm the
+  license permits redistribution** before shipping.
+- MSVC runtime set to dynamic across all targets (CMAKE_MSVC_RUNTIME_LIBRARY) to
+  avoid LNK4098. Bundle required runtime DLLs with the Windows build.
+- CMake 4.x note: `CMAKE_POLICY_VERSION_MINIMUM=3.5` is set so older-minimum
+  deps (glfw/glm/glad) still configure.
+
+---
+
+## 11. Local storage
+
+- **No cloud database.** All persistence is on the user's machine:
+  - **TLE/SATCAT cache** — files on disk, timestamped for staleness.
+  - **User settings + location + favorites** — **SQLite** file (or JSON if we
+    keep it trivial).
+- SQLite is embedded in the binary — no server, no setup, no cost.
+
+---
+
+## 12. Assets & licensing 🔵 OPEN FOR REVIEW
+
+- **Earth imagery:** NASA Visible Earth / Blue Marble (public domain). Verify
+  each specific image's terms before bundling.
+- **Fonts:** ship only a redistributable font (e.g. an SIL OFL face).
+- **libsgp4:** confirm its license allows redistribution in a binary.
+- **Our code license:** default **MIT** (decide before first public release).
+- **CelesTrak data:** respect fair-use; add attribution in About/README.
+
+---
+
+## 13. Milestones (phased)
+
+**Phase 0 — Scaffolding** ✅ **DONE (2026-10-28)**
+CMake + FetchContent (glfw/glm/glad), `Window` class with an OpenGL 3.3 core
+context, clear-color frame loop (Esc to quit), module directory structure, CI
+build placeholder, README, .gitignore. Verified: configures clean, builds with
+no warnings on MSVC, and the executable launches and runs.
+
+**Phase 1 — Earth & camera**
+Textured Blue Marble sphere, orbit camera (drag/zoom), shader plumbing.
+
+**Phase 2 — Data + propagation**
+`CelestrakProvider` (HTTP fetch + cache), parse TLEs, `Propagator` (SGP4),
+coordinate transforms. Verify against a known reference (e.g. ISS position).
+
+**Phase 3 — Live markers + selection + UI foundation**
+Curated satellites as live markers; ray-pick selection; first custom UI panel.
+**UI review checkpoint** (custom vs ImGui-fallback decision).
+
+**Phase 4 — Info panel, ground tracks, list/search**
+Full info panel from SATCAT + live values; ground tracks; searchable list of
+the full set (non-rendered ones live here).
+
+**Phase 5 — Location & pass predictions**
+Observer location (manual entry first; auto later), overhead-now, AOS/LOS pass
+windows.
+
+**Phase 6 — Polish & release prep**
+Visual polish, settings persistence, About/attribution, packaging.
+
+**Phase 7 — Public release**
+GitHub Release (Windows installer/zip), README with screenshots, optional code
+signing, later a GitHub Pages download page.
+
+---
+
+## 14. Distribution & going public
+
+- **Binaries → GitHub Releases** (free). Windows installer (Inno Setup/NSIS) or
+  portable zip with bundled DLLs.
+- **Download page (later) → GitHub Pages** — static site, download button links
+  to the latest Release. No backend, no DB.
+- **Code signing** ✅ **skipped for v1.** We accept the Windows SmartScreen
+  "unknown publisher" warning rather than pay for a cert. The README download
+  instructions will note it's expected. Revisit only if/when it becomes a real
+  adoption barrier (or when/if we ship macOS, which needs Apple notarization).
+- **No secrets in the binary** — v1 uses keyless CelesTrak, so nothing to leak.
+- **CI (later):** GitHub Actions to build + attach artifacts on tag.
+
+---
+
+## 15. Explicitly deferred / future
+
+- `RemoteProvider` (optional server for TLE caching / proxying) — only if a
+  feature demands it; needs no real DB even then.
+- Full ~10k active catalog as 3D markers (instanced rendering + LOD/culling).
+- macOS / Linux builds.
+- Night lights, cloud layer, atmosphere shader, specular oceans.
+- Auto-update.
+- Cloud DB — only if accounts / sync / server-side history are ever added.
+
+---
+
+## 16. Design questions — status
+
+1. ✅ **Visible subset:** ISS/stations + GPS + Starlink sample on the globe;
+   everything else in the searchable list. (Marker *style* still open.)
+2. ✅ **TLE freshness:** 6h re-download window; positions always propagated to
+   `now` and therefore always current — see §3.3.
+3. ◻️ **UI path (conditional):** custom OpenGL UI is the primary path; **fall
+   back to Dear ImGui** for panels if custom complexity isn't worth it. Decided
+   at the **Phase 3 checkpoint**, globe stays custom either way.
+4. ✅ **Location input:** both manual lat/lon **and** IP-based auto-detection.
+   (Specific IP-geolocation endpoint TBD at Phase 5.)
+5. ✅ **Code signing:** skipped for v1 (accept SmartScreen warning).
+   ◻️ **Code license:** default **MIT** — confirm before first public release.
+6. 🔵 **Earth texture resolution** vs download size — resolve at Phase 1
+   (rendering).
+
+Legend: ✅ resolved · ◻️ decided-with-condition / to confirm · 🔵 still open.
