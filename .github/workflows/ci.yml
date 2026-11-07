@@ -19,8 +19,12 @@ jobs:
         with:
           python-version: "3.x"
 
+      # Don't pin a VS version here: the hosted runner image changes over time
+      # (windows-latest no longer guarantees "Visual Studio 17 2022"). Letting
+      # CMake auto-detect the installed Visual Studio generator keeps CI working
+      # across image bumps. Locally you can still pass -G explicitly.
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022"
+        run: cmake -S . -B build
 
       - name: Build
         run: cmake --build build --config Debug
