@@ -8,8 +8,8 @@ namespace globe {
 // to a position on/above the unit globe where Earth radius == 1.
 //
 // Convention (must match EarthSphere's UV mapping so markers line up with the
-// texture): north pole at +Y, longitude mapped as theta = lon + PI so that
-// texture column u = (lon + 180) / 360.
+// texture): north pole at +Y, and because the sphere mirrors its texture
+// (uv = 1 - u), longitude is mirrored to match as theta = PI - lon.
 glm::vec3 geodeticToGlobe(double latRad, double lonRad, double altKm);
 
 } // namespace globe

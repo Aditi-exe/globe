@@ -35,7 +35,7 @@ struct SatelliteCatalog::Entry {
 SatelliteCatalog::SatelliteCatalog() = default;
 SatelliteCatalog::~SatelliteCatalog() = default;
 
-int SatelliteCatalog::loadTleFile(const std::string& path) {
+int SatelliteCatalog::loadTleFile(const std::string& path, int maxCount) {
     std::ifstream file(path);
     if (!file) {
         std::fprintf(stderr, "[catalog] could not open %s\n", path.c_str());
@@ -59,6 +59,9 @@ int SatelliteCatalog::loadTleFile(const std::string& path) {
             st.norad = static_cast<int>(tle.NoradNumber());
             states_.push_back(std::move(st));
             ++added;
+            if (maxCount > 0 && added >= maxCount) {
+                break; // curated cap reached (e.g. Starlink sample)
+            }
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[catalog] bad TLE '%s': %s\n", n.c_str(), e.what());
         }

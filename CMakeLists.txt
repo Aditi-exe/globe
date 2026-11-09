@@ -25,6 +25,11 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
 endif()
 
+# We only ever build the executable, never `cmake --install`. cpr 1.11 emits an
+# unconditional install(EXPORT) that references the (non-exported) static libcurl
+# target and fails generation; skipping install rules project-wide sidesteps it.
+set(CMAKE_SKIP_INSTALL_RULES ON)
+
 include(FetchContent)
 
 # ---------------------------------------------------------------------------
@@ -66,7 +71,65 @@ FetchContent_Declare(stb
     GIT_TAG master
     GIT_SHALLOW TRUE)
 
-FetchContent_MakeAvailable(glfw glm glad stb)
+# libsgp4 - SGP4/SDP4 orbit propagation (dnwrnr/sgp4). Its bundled CMake isn't
+# consumable as a subproject, so we fetch the sources and compile them ourselves.
+# SOURCE_SUBDIR points at the repo's cmake/ dir (no CMakeLists.txt) so
+# MakeAvailable populates without add_subdirectory.
+# TODO: pin GIT_TAG to a specific commit for reproducibility before release.
+FetchContent_Declare(sgp4
+    GIT_REPOSITORY https://github.com/dnwrnr/sgp4.git
+    GIT_TAG master
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR cmake)
+
+# cpr - C++ Requests (HTTP) for fetching live TLEs from CelesTrak. It pulls in
+# libcurl, which we build from source and point at the Windows native TLS stack
+# (Schannel) so there's NO OpenSSL/zlib/psl system dependency to install.
+set(CPR_USE_SYSTEM_CURL OFF CACHE BOOL "" FORCE)
+set(CPR_ENABLE_SSL ON CACHE BOOL "" FORCE)
+set(CPR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CPR_INSTALL OFF CACHE BOOL "" FORCE) # we don't install; skip export rules
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+# Options for cpr's bundled libcurl: HTTP(S) only, native Schannel TLS, no extras.
+set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(HTTP_ONLY ON CACHE BOOL "" FORCE)
+set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
+set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
+set(CURL_ZLIB OFF CACHE BOOL "" FORCE)
+set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+FetchContent_Declare(cpr
+    GIT_REPOSITORY https://github.com/libcpr/cpr.git
+    GIT_TAG 1.11.2
+    GIT_SHALLOW TRUE)
+
+FetchContent_MakeAvailable(glfw glm glad stb sgp4 cpr)
+
+# cpr's bundled libcurl (like GLAD) resets CMP0091, so it ignores
+# CMAKE_MSVC_RUNTIME_LIBRARY and compiles against the STATIC CRT (/MTd) -> the
+# LNK2038 'MTd vs MDd' / LNK4098 LIBCMTD conflict. Force the dynamic CRT with a
+# raw flag on every curl/cpr target that compiles sources.
+if(MSVC)
+    foreach(_t IN ITEMS libcurl_object libcurl_static libcurl_shared libcurl cpr)
+        if(TARGET ${_t})
+            get_target_property(_aliased ${_t} ALIASED_TARGET)
+            if(NOT _aliased) # can't set options on an alias target
+                target_compile_options(${_t} PRIVATE $<IF:$<CONFIG:Debug>,/MDd,/MD>)
+            endif()
+        endif()
+    endforeach()
+endif()
+
+file(GLOB SGP4_SOURCES
+    "${sgp4_SOURCE_DIR}/libsgp4/*.cc"
+    "${sgp4_SOURCE_DIR}/libsgp4/*.cpp")
+add_library(sgp4 STATIC ${SGP4_SOURCES})
+target_include_directories(sgp4 PUBLIC ${sgp4_SOURCE_DIR}/libsgp4)
+if(MSVC)
+    set_property(TARGET sgp4 PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
 
 # Generate the GLAD loader target for OpenGL 3.3 core profile.
 glad_add_library(glad_gl_core_33 REPRODUCIBLE API gl:core=3.3)
@@ -88,13 +151,17 @@ add_executable(globe
     src/render/Texture.cpp
     src/render/Camera.cpp
     src/render/EarthSphere.cpp
-    src/render/stb_image_impl.cpp)
+    src/render/MarkerBatch.cpp
+    src/render/stb_image_impl.cpp
+    src/domain/CoordTransforms.cpp
+    src/domain/SatelliteCatalog.cpp
+    src/net/TleSource.cpp)
 
-target_include_directories(globe PRIVATE src ${stb_SOURCE_DIR})
+target_include_directories(globe PRIVATE src ${stb_SOURCE_DIR} ${sgp4_SOURCE_DIR}/libsgp4)
 target_compile_definitions(globe PRIVATE
     GLFW_INCLUDE_NONE
     GLOBE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
-target_link_libraries(globe PRIVATE glfw glm::glm glad_gl_core_33)
+target_link_libraries(globe PRIVATE glfw glm::glm glad_gl_core_33 sgp4 cpr::cpr)
 
 if(MSVC)
     target_compile_options(globe PRIVATE /W4 /permissive-)

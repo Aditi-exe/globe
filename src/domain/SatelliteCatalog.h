@@ -31,7 +31,9 @@ public:
     SatelliteCatalog& operator=(const SatelliteCatalog&) = delete;
 
     // Parse name/line1/line2 triples from a .tle file. Returns satellites added.
-    int loadTleFile(const std::string& path);
+    // maxCount > 0 caps how many are taken from this file (0 = all); used to keep
+    // a huge feed like Starlink down to a curated sample.
+    int loadTleFile(const std::string& path, int maxCount = 0);
 
     // Propagate every satellite to the current UTC time and refresh states.
     void updateNow();

@@ -300,16 +300,33 @@ Esc quit), Shader/Texture/Camera/EarthSphere classes, GLSL with a simple sun.
 Image loading via stb (FetchContent). Missing texture falls back to a magenta
 checker. Drop `assets/textures/earth_day.jpg` (NASA Blue Marble) for the real map.
 
-**Phase 2 — Data + propagation** (NOT STARTED — deferred)
-`CelestrakProvider` (HTTP fetch + cache), parse TLEs, `Propagator` (SGP4),
-coordinate transforms. Verify against a known reference (e.g. ISS position).
+**Phase 2 — Data + propagation**
+- Step 1 ✅ **DONE (2026-11-09):** libsgp4 (sources compiled directly),
+  SatelliteCatalog (parse TLE + SGP4 to UTC now), CoordTransforms
+  (ECI→geodetic→unit globe; theta = π − lon to match the flipped texture UVs),
+  MarkerBatch (amber GL_POINTS), bundled real TLE snapshots (77 sats). Verified
+  ISS altitude correct. Markers placed at true positions each frame.
+- Step 2 ✅ **DONE (2026-11-09):** live CelesTrak fetch via cpr (libcurl built
+  from source, Schannel TLS, no OpenSSL) + 6h disk cache in `./cache/`, bundled
+  snapshot as offline fallback (`net/TleSource.cpp`, four-tier resolve). Starlink
+  live feed capped to 60 to stay a curated sample. Tier-1 fetch logging (status,
+  latency, curl error reason) to stderr. Verified live: dots load & move.
 
-> A working prototype of this was built on 2026-11-08 then **parked** (we chose
-> to finish Phase 1 first). The code lives in `parked/phase2/` — libsgp4 wiring,
-> SatelliteCatalog (SGP4), CoordTransforms (ECI→geodetic→globe, verified ISS alt
-> 418.9 km), MarkerBatch, marker shaders, and bundled TLE snapshots. Resurrect it
-> when we return to Phase 2 rather than rebuilding from scratch. Note from that
-> run: still need to confirm continent/marker E/W alignment visually.
+**Known issues / backlog (flagged during Phase 2, fix later):**
+- **Blank white window until first data loads.** Root cause: the TLE fetch is
+  synchronous on the main thread before the render loop's first frame. Only on a
+  stale/empty cache (first run or >6h later); fresh-cache opens are instant. Fix
+  (per §3.3): draw a loading/splash frame first, then fetch on a background
+  thread and hot-swap the catalog when it arrives.
+- **Attribution + licenses (release blocker, Phase 6/7 README + About).** Two
+  parts: (1) CelesTrak data credit — "Orbital data courtesy of CelesTrak
+  (celestrak.org)", data originates from US Space Force / 18 SDS (already noted
+  §8, §14); (2) third-party library licenses — required for binary distribution:
+  GLFW (zlib), GLM (MIT), GLAD (MIT), stb (MIT/public domain), libsgp4
+  (Apache-2.0), cpr + libcurl (MIT/curl). Ship a bundled THIRD-PARTY-LICENSES
+  file + a credits section. Don't forget #2 — it's a legal requirement, not just
+  courtesy.
+- _(flag 2 — TBD)_
 
 **Phase 3 — Live markers + selection + UI foundation**
 Curated satellites as live markers; ray-pick selection; first custom UI panel.
