@@ -58,20 +58,42 @@ FetchContent_Declare(glad
     GIT_SHALLOW TRUE
     SOURCE_SUBDIR cmake)
 
-FetchContent_MakeAvailable(glfw glm glad)
+# stb - single-header image loader (the repo has no CMakeLists, so MakeAvailable
+# just populates it and sets stb_SOURCE_DIR).
+# TODO: pin GIT_TAG to a specific commit for reproducibility before release.
+FetchContent_Declare(stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG master
+    GIT_SHALLOW TRUE)
+
+FetchContent_MakeAvailable(glfw glm glad stb)
 
 # Generate the GLAD loader target for OpenGL 3.3 core profile.
 glad_add_library(glad_gl_core_33 REPRODUCIBLE API gl:core=3.3)
+
+# GLAD's CMake resets policy CMP0091, so the MSVC_RUNTIME_LIBRARY property is
+# ignored for its target (RuntimeLibrary comes out empty -> static CRT -> the
+# LNK4098 'LIBCMT conflicts' warning). Force the dynamic CRT with a raw flag.
+if(MSVC)
+    target_compile_options(glad_gl_core_33 PRIVATE $<IF:$<CONFIG:Debug>,/MDd,/MD>)
+endif()
 
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
 add_executable(globe
     src/main.cpp
-    src/platform/Window.cpp)
+    src/platform/Window.cpp
+    src/render/Shader.cpp
+    src/render/Texture.cpp
+    src/render/Camera.cpp
+    src/render/EarthSphere.cpp
+    src/render/stb_image_impl.cpp)
 
-target_include_directories(globe PRIVATE src)
-target_compile_definitions(globe PRIVATE GLFW_INCLUDE_NONE)
+target_include_directories(globe PRIVATE src ${stb_SOURCE_DIR})
+target_compile_definitions(globe PRIVATE
+    GLFW_INCLUDE_NONE
+    GLOBE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 target_link_libraries(globe PRIVATE glfw glm::glm glad_gl_core_33)
 
 if(MSVC)

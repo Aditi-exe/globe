@@ -18,6 +18,12 @@ void framebufferSizeCallback(GLFWwindow* handle, int width, int height) {
     }
 }
 
+void scrollCallback(GLFWwindow* handle, double /*xOffset*/, double yOffset) {
+    if (auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle))) {
+        self->onScroll(yOffset);
+    }
+}
+
 void errorCallback(int code, const char* description) {
     // Phase 0: surface GLFW errors to stderr. Swap for a real logger later.
     std::fprintf(stderr, "[GLFW] error %d: %s\n", code, description);
@@ -48,6 +54,7 @@ Window::Window(int width, int height, std::string title)
     glfwMakeContextCurrent(window_);
     glfwSetWindowUserPointer(window_, this);
     glfwSetFramebufferSizeCallback(window_, framebufferSizeCallback);
+    glfwSetScrollCallback(window_, scrollCallback);
 
     if (!gladLoadGL(glfwGetProcAddress)) {
         glfwDestroyWindow(window_);
@@ -88,6 +95,16 @@ void Window::swapBuffers() const {
 void Window::onResize(int width, int height) {
     width_ = width;
     height_ = height;
+}
+
+void Window::onScroll(double yOffset) {
+    scrollDelta_ += yOffset;
+}
+
+double Window::consumeScrollDelta() {
+    double d = scrollDelta_;
+    scrollDelta_ = 0.0;
+    return d;
 }
 
 } // namespace globe

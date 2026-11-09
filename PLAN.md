@@ -294,12 +294,22 @@ context, clear-color frame loop (Esc to quit), module directory structure, CI
 build placeholder, README, .gitignore. Verified: configures clean, builds with
 no warnings on MSVC, and the executable launches and runs.
 
-**Phase 1 — Earth & camera**
-Textured Blue Marble sphere, orbit camera (drag/zoom), shader plumbing.
+**Phase 1 — Earth & camera** ✅ **DONE (2026-11-08)**
+Textured UV-sphere Earth, orbit/trackball camera (left-drag rotate, scroll zoom,
+Esc quit), Shader/Texture/Camera/EarthSphere classes, GLSL with a simple sun.
+Image loading via stb (FetchContent). Missing texture falls back to a magenta
+checker. Drop `assets/textures/earth_day.jpg` (NASA Blue Marble) for the real map.
 
-**Phase 2 — Data + propagation**
+**Phase 2 — Data + propagation** (NOT STARTED — deferred)
 `CelestrakProvider` (HTTP fetch + cache), parse TLEs, `Propagator` (SGP4),
 coordinate transforms. Verify against a known reference (e.g. ISS position).
+
+> A working prototype of this was built on 2026-11-08 then **parked** (we chose
+> to finish Phase 1 first). The code lives in `parked/phase2/` — libsgp4 wiring,
+> SatelliteCatalog (SGP4), CoordTransforms (ECI→geodetic→globe, verified ISS alt
+> 418.9 km), MarkerBatch, marker shaders, and bundled TLE snapshots. Resurrect it
+> when we return to Phase 2 rather than rebuilding from scratch. Note from that
+> run: still need to confirm continent/marker E/W alignment visually.
 
 **Phase 3 — Live markers + selection + UI foundation**
 Curated satellites as live markers; ray-pick selection; first custom UI panel.

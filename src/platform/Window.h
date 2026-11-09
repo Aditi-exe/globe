@@ -24,8 +24,12 @@ public:
     void pollEvents() const;
     void swapBuffers() const;
 
-    // Called by the framebuffer-size callback; keeps cached size in sync.
+    // Accumulated mouse-scroll offset since the last call (used for zoom).
+    [[nodiscard]] double consumeScrollDelta();
+
+    // Called by GLFW callbacks; keep cached state in sync.
     void onResize(int width, int height);
+    void onScroll(double yOffset);
 
     [[nodiscard]] GLFWwindow* handle() const { return window_; }
     [[nodiscard]] int width() const { return width_; }
@@ -36,6 +40,7 @@ private:
     int width_;
     int height_;
     std::string title_;
+    double scrollDelta_ = 0.0;
 };
 
 } // namespace globe
