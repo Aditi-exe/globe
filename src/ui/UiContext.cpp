@@ -30,6 +30,7 @@ UiContext::~UiContext() {
 
 void UiContext::begin(int width, int height) {
     // Pixel space: (0,0) top-left, y increases downward.
+    screenH_ = height;
     proj_ = glm::ortho(0.0f, static_cast<float>(width),
                        static_cast<float>(height), 0.0f);
     glDisable(GL_DEPTH_TEST);
@@ -38,8 +39,20 @@ void UiContext::begin(int width, int height) {
 }
 
 void UiContext::end() {
+    glDisable(GL_SCISSOR_TEST); // in case a clip was left open
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+}
+
+void UiContext::pushClip(float x, float y, float w, float h) {
+    // glScissor origin is bottom-left; our pixel space is top-left, so flip y.
+    const int gy = screenH_ - static_cast<int>(y + h);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(static_cast<int>(x), gy, static_cast<int>(w), static_cast<int>(h));
+}
+
+void UiContext::popClip() {
+    glDisable(GL_SCISSOR_TEST);
 }
 
 void UiContext::drawRect(float x, float y, float w, float h, const glm::vec4& color) {

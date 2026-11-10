@@ -153,13 +153,17 @@ add_executable(globe
     src/render/Camera.cpp
     src/render/EarthSphere.cpp
     src/render/MarkerBatch.cpp
+    src/render/TrackRenderer.cpp
     src/render/stb_image_impl.cpp
     src/render/stb_truetype_impl.cpp
     src/domain/CoordTransforms.cpp
     src/domain/SatelliteCatalog.cpp
+    src/domain/Satcat.cpp
     src/net/TleSource.cpp
+    src/net/SatcatSource.cpp
     src/ui/TextRenderer.cpp
-    src/ui/UiContext.cpp)
+    src/ui/UiContext.cpp
+    src/ui/SatelliteList.cpp)
 
 target_include_directories(globe PRIVATE src ${stb_SOURCE_DIR} ${sgp4_SOURCE_DIR}/libsgp4)
 target_compile_definitions(globe PRIVATE

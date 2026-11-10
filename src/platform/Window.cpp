@@ -24,6 +24,20 @@ void scrollCallback(GLFWwindow* handle, double /*xOffset*/, double yOffset) {
     }
 }
 
+void charCallback(GLFWwindow* handle, unsigned int codepoint) {
+    if (auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle))) {
+        self->onChar(codepoint);
+    }
+}
+
+void keyCallback(GLFWwindow* handle, int key, int /*scancode*/, int action, int /*mods*/) {
+    if (key == GLFW_KEY_BACKSPACE && action != GLFW_RELEASE) { // press + repeat
+        if (auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle))) {
+            self->onBackspace();
+        }
+    }
+}
+
 void errorCallback(int code, const char* description) {
     // Phase 0: surface GLFW errors to stderr. Swap for a real logger later.
     std::fprintf(stderr, "[GLFW] error %d: %s\n", code, description);
@@ -55,6 +69,8 @@ Window::Window(int width, int height, std::string title)
     glfwSetWindowUserPointer(window_, this);
     glfwSetFramebufferSizeCallback(window_, framebufferSizeCallback);
     glfwSetScrollCallback(window_, scrollCallback);
+    glfwSetCharCallback(window_, charCallback);
+    glfwSetKeyCallback(window_, keyCallback);
 
     if (!gladLoadGL(glfwGetProcAddress)) {
         glfwDestroyWindow(window_);
@@ -101,10 +117,33 @@ void Window::onScroll(double yOffset) {
     scrollDelta_ += yOffset;
 }
 
+void Window::onChar(unsigned int codepoint) {
+    // Our glyph atlas is printable ASCII (32..126); ignore anything else.
+    if (codepoint >= 32 && codepoint < 127) {
+        typed_ += static_cast<char>(codepoint);
+    }
+}
+
+void Window::onBackspace() {
+    ++backspaces_;
+}
+
 double Window::consumeScrollDelta() {
     double d = scrollDelta_;
     scrollDelta_ = 0.0;
     return d;
+}
+
+std::string Window::consumeTypedChars() {
+    std::string s = typed_;
+    typed_.clear();
+    return s;
+}
+
+int Window::consumeBackspaces() {
+    int n = backspaces_;
+    backspaces_ = 0;
+    return n;
 }
 
 } // namespace globe

@@ -335,6 +335,19 @@ checker. Drop `assets/textures/earth_day.jpg` (NASA Blue Marble) for the real ma
   framebuffer/window ratio (or do picking in NDC directly).
 - **Marker style still 🔵 OPEN FOR REVIEW** (§6). Current: flat amber dots, cyan
   selection. Revisit size/shape/per-group color once ground tracks land.
+- **Track clarity pass (deferred).** Orbit path + ground shadow work and look
+  good; make the relationship clearer later: faint vertical droplines from orbit
+  to shadow, alpha-fade toward each arc's ends so it doesn't stop abruptly, and
+  tune the shadow lift (currently 10 km) / line width. User: "we'll make it
+  clearer later as a part of the improvements."
+- **Diversify rendered feeds (deferred).** Current globe feeds (stations,
+  gps-ops, starlink) are nearly all US payloads, so the info panel's Type/Owner
+  are monotonous. Add more CelesTrak GROUPs in `main.cpp` feeds (each capped like
+  Starlink) for variety: `glonass-ops` (Russia), `galileo` (ESA), `beidou`
+  (China), `weather`/`noaa`/`goes` (mixed), and a debris group
+  (`cosmos-2251-debris` / `iridium-33-debris`) to show non-payload object types.
+  Data source stays CelesTrak — it already carries all of this keylessly; this is
+  a feed-selection change, not a new provider. User: add in a later phase.
 - **UI text is single-size, unhinted** (stb_truetype baked atlas, 18px, Segoe UI
   dev fallback). Upgrade to `stbtt_PackFontRange` + oversampling (or FreeType) if
   crispness isn't good enough; bundle the OFL font (see attribution item).
@@ -354,9 +367,31 @@ text) showing the selected sat's live name/NORAD/lat/lon/alt.
 works; we continue the bespoke toolkit for the list/search/time-control rather
 than falling back to ImGui. Revisit only if a later widget proves too costly.
 
-**Phase 4 — Info panel, ground tracks, list/search**
-Full info panel from SATCAT + live values; ground tracks; searchable list of
-the full set (non-rendered ones live here).
+**Phase 4 — Info panel, ground tracks, list/search** ✅ **DONE (2026-11-10)**
+- **Orbit path + ground shadow ✅ DONE (2026-11-10):** click a satellite → its
+  path for one full orbital period (from mean motion), as GL_LINE_STRIP arcs
+  (`render/TrackRenderer`, `track.vert/frag`). Two layers: the **orbit** at true
+  altitude (through the marker — dim past arc, cyan future arc) and a **ground
+  shadow**, the same points dropped to the surface (dark translucent line).
+  Sampled from SGP4 each frame (so it slides with time), shadow lifted ~10 km to
+  avoid z-fighting; the back half is hidden by the globe via depth test
+  (`SatelliteCatalog::track` returns orbit+shadow past/future arcs).
+- **Info panel: velocity + SATCAT ✅ DONE (2026-11-10):** live orbital speed
+  (`SatelliteState.speedKmS` from `Eci::Velocity().Magnitude()`), plus object
+  type / owner / launch date from CelesTrak SATCAT. `net/SatcatSource` fetches
+  `satcat/records.php?GROUP=<g>&FORMAT=CSV` per feed group (weekly cache,
+  best-effort — no bundled fallback, panel omits the fields if unavailable);
+  `domain/Satcat` parses CSV by header name, keys by NORAD, humanizes owner/type
+  codes. Panel height now fits its line count. First run on empty cache = 6
+  network calls (3 TLE + 3 SATCAT).
+- **Searchable list ✅ DONE (2026-11-10):** right-edge panel of the whole
+  catalog (`ui/SatelliteList`). Type-to-filter by name/NORAD (search box with
+  blinking caret + match count), wheel-scroll while hovering (rows clipped via
+  new `UiContext::pushClip/popClip` scissor), click a row to select (same path as
+  a marker pick). Tab toggles the panel; Esc clears the filter else quits. Text
+  entry plumbed through `Window` (GLFW char + key(backspace) callbacks →
+  `consumeTypedChars`/`consumeBackspaces`). Scroll/drag route to the list when the
+  cursor is over it, else to the camera.
 
 **Phase 5 — Location & pass predictions**
 Observer location (manual entry first; auto later), overhead-now, AOS/LOS pass

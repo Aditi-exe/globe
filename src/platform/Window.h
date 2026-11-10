@@ -27,9 +27,16 @@ public:
     // Accumulated mouse-scroll offset since the last call (used for zoom).
     [[nodiscard]] double consumeScrollDelta();
 
+    // Text-entry queue for the search box: printable characters typed since the
+    // last call, and the number of backspaces pressed (repeats included).
+    [[nodiscard]] std::string consumeTypedChars();
+    [[nodiscard]] int consumeBackspaces();
+
     // Called by GLFW callbacks; keep cached state in sync.
     void onResize(int width, int height);
     void onScroll(double yOffset);
+    void onChar(unsigned int codepoint);
+    void onBackspace();
 
     [[nodiscard]] GLFWwindow* handle() const { return window_; }
     [[nodiscard]] int width() const { return width_; }
@@ -41,6 +48,8 @@ private:
     int height_;
     std::string title_;
     double scrollDelta_ = 0.0;
+    std::string typed_;      // printable chars queued since last consume
+    int backspaces_ = 0;     // backspace presses queued since last consume
 };
 
 } // namespace globe

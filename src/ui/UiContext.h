@@ -28,12 +28,19 @@ public:
     void drawRect(float x, float y, float w, float h, const glm::vec4& color);
     void drawText(float x, float y, const std::string& text, const glm::vec4& color);
 
+    // Clip subsequent draws to a pixel rect (e.g. a scrolling list). Must be
+    // paired with popClip(). Coordinates are the same top-left pixel space as
+    // the draw calls.
+    void pushClip(float x, float y, float w, float h);
+    void popClip();
+
     [[nodiscard]] float textWidth(const std::string& text) const;
     [[nodiscard]] float lineHeight() const;
     [[nodiscard]] bool textReady() const;
 
 private:
     glm::mat4 proj_{1.0f};
+    int screenH_ = 0; // for flipping clip rects into GL's bottom-left origin
     std::unique_ptr<Shader> rectShader_;
     std::unique_ptr<TextRenderer> text_;
     unsigned int vao_ = 0;
