@@ -19,6 +19,9 @@ public:
     void use() const;
     void setMat4(const char* name, const glm::mat4& value) const;
     void setInt(const char* name, int value) const;
+    void setFloat(const char* name, float value) const;
+    void setVec3(const char* name, const glm::vec3& value) const;
+    void setVec4(const char* name, const glm::vec4& value) const;
 
     [[nodiscard]] unsigned int id() const { return program_; }
 

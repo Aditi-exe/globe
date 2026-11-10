@@ -210,11 +210,13 @@ because a custom UI means we own:
 - Start with **stb_truetype** for a single-font glyph atlas; upgrade to FreeType
   only if we need crisp multi-size/hinted text.
 
-### 🔵 OPEN FOR REVIEW — fallback kept in pocket
-If the custom UI starts eating the schedule, the fallback is **Dear ImGui** for
-panels (functional, cross-platform, battle-tested) while the **3D globe stays
-fully custom** — the globe is the "fancy" part and is unaffected by the UI
-choice. We decide this at the Phase 3 review, not now.
+### ✅ RESOLVED (Phase 3, 2026-11-10) — staying custom
+Fallback was **Dear ImGui** for panels if the custom UI ate the schedule. At the
+Phase 3 checkpoint the hard part (stb_truetype text rendering + a minimal
+immediate-mode overlay) came together cleanly, so **we're keeping the custom
+toolkit** and building the list/search/time-control the same way. ImGui stays in
+the back pocket only if a specific later widget proves disproportionately costly;
+the 3D globe was always custom regardless.
 
 ---
 
@@ -326,11 +328,31 @@ checker. Drop `assets/textures/earth_day.jpg` (NASA Blue Marble) for the real ma
   (Apache-2.0), cpr + libcurl (MIT/curl). Ship a bundled THIRD-PARTY-LICENSES
   file + a credits section. Don't forget #2 — it's a legal requirement, not just
   courtesy.
+- **High-DPI cursor scaling.** `pickSatellite` and the UI overlay work in
+  framebuffer pixels, but `glfwGetCursorPos` returns window coords. Identical at
+  100% display scaling; on a scaled/high-DPI monitor picking is off by the scale
+  factor and the panel is sized in fb-pixels. Fix: convert cursor coords by
+  framebuffer/window ratio (or do picking in NDC directly).
+- **Marker style still 🔵 OPEN FOR REVIEW** (§6). Current: flat amber dots, cyan
+  selection. Revisit size/shape/per-group color once ground tracks land.
+- **UI text is single-size, unhinted** (stb_truetype baked atlas, 18px, Segoe UI
+  dev fallback). Upgrade to `stbtt_PackFontRange` + oversampling (or FreeType) if
+  crispness isn't good enough; bundle the OFL font (see attribution item).
+- ✅ **RESOLVED (2026-11-10): cache is now in a fixed per-user dir**
+  (`%LOCALAPPDATA%\globe\cache\`, XDG/`~/.cache/globe` elsewhere) via
+  `platform/Paths.cpp userCacheDir()`, no longer working-dir-relative. Note the
+  Starlink cache file is ~1.8 MB (full feed) though we only render 60.
 - _(flag 2 — TBD)_
 
-**Phase 3 — Live markers + selection + UI foundation**
-Curated satellites as live markers; ray-pick selection; first custom UI panel.
-**UI review checkpoint** (custom vs ImGui-fallback decision).
+**Phase 3 — Live markers + selection + UI foundation** ✅ **DONE (2026-11-10)**
+Live markers (Phase 2); **ray-pick selection** (screen-space nearest + ray-sphere
+occlusion, click-vs-drag; `main.cpp pickSatellite`) with a cyan highlight; **first
+custom UI panel** — from-scratch text rendering (stb_truetype glyph atlas →
+`ui/TextRenderer`) + a minimal overlay toolkit (`ui/UiContext`: ortho rects +
+text) showing the selected sat's live name/NORAD/lat/lon/alt.
+**UI review checkpoint → DECIDED: stay custom.** Text rendering (the risky part)
+works; we continue the bespoke toolkit for the list/search/time-control rather
+than falling back to ImGui. Revisit only if a later widget proves too costly.
 
 **Phase 4 — Info panel, ground tracks, list/search**
 Full info panel from SATCAT + live values; ground tracks; searchable list of

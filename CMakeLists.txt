@@ -147,15 +147,19 @@ endif()
 add_executable(globe
     src/main.cpp
     src/platform/Window.cpp
+    src/platform/Paths.cpp
     src/render/Shader.cpp
     src/render/Texture.cpp
     src/render/Camera.cpp
     src/render/EarthSphere.cpp
     src/render/MarkerBatch.cpp
     src/render/stb_image_impl.cpp
+    src/render/stb_truetype_impl.cpp
     src/domain/CoordTransforms.cpp
     src/domain/SatelliteCatalog.cpp
-    src/net/TleSource.cpp)
+    src/net/TleSource.cpp
+    src/ui/TextRenderer.cpp
+    src/ui/UiContext.cpp)
 
 target_include_directories(globe PRIVATE src ${stb_SOURCE_DIR} ${sgp4_SOURCE_DIR}/libsgp4)
 target_compile_definitions(globe PRIVATE
