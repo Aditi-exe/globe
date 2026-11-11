@@ -17,6 +17,7 @@ struct SatelliteState {
     double lonDeg = 0.0;
     double altKm = 0.0;
     double speedKmS = 0.0;    // orbital speed from SGP4 velocity
+    int group = 0;            // which feed it came from (for marker coloring)
     glm::vec3 position{0.0f}; // on the unit globe (Earth radius == 1)
     bool valid = false;       // false if propagation failed (e.g. decayed)
 };
@@ -65,8 +66,9 @@ public:
 
     // Parse name/line1/line2 triples from a .tle file. Returns satellites added.
     // maxCount > 0 caps how many are taken from this file (0 = all); used to keep
-    // a huge feed like Starlink down to a curated sample.
-    int loadTleFile(const std::string& path, int maxCount = 0);
+    // a huge feed like Starlink down to a curated sample. `group` tags every
+    // satellite from this file (for per-group marker coloring).
+    int loadTleFile(const std::string& path, int maxCount = 0, int group = 0);
 
     // Propagate every satellite to the current UTC time and refresh states.
     void updateNow();

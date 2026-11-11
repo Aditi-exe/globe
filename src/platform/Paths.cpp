@@ -48,4 +48,23 @@ std::string userCacheDir(const std::string& appName) {
     return (fs::current_path() / "cache").string();
 }
 
+std::string userConfigDir(const std::string& appName) {
+#if defined(_WIN32)
+    const std::string base = envVar("LOCALAPPDATA");
+    if (!base.empty()) {
+        return (fs::path(base) / appName).string();
+    }
+#else
+    const std::string xdg = envVar("XDG_CONFIG_HOME");
+    if (!xdg.empty()) {
+        return (fs::path(xdg) / appName).string();
+    }
+    const std::string home = envVar("HOME");
+    if (!home.empty()) {
+        return (fs::path(home) / ".config" / appName).string();
+    }
+#endif
+    return fs::current_path().string();
+}
+
 } // namespace globe

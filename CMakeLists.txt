@@ -146,6 +146,7 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(globe
     src/main.cpp
+    src/app/Settings.cpp
     src/platform/Window.cpp
     src/platform/Paths.cpp
     src/render/Shader.cpp
@@ -170,7 +171,8 @@ add_executable(globe
 target_include_directories(globe PRIVATE src ${stb_SOURCE_DIR} ${sgp4_SOURCE_DIR}/libsgp4)
 target_compile_definitions(globe PRIVATE
     GLFW_INCLUDE_NONE
-    GLOBE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    GLOBE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    GLOBE_VERSION="${PROJECT_VERSION}")
 target_link_libraries(globe PRIVATE glfw glm::glm glad_gl_core_33 sgp4 cpr::cpr)
 
 if(MSVC)

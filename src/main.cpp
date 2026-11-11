@@ -6,6 +6,7 @@
 //   - Left-click a satellite to select it, click empty space to clear. Esc quits.
 // See PLAN.md for the roadmap.
 
+#include "app/Settings.h"
 #include "domain/Gazetteer.h"
 #include "domain/Satcat.h"
 #include "domain/SatelliteCatalog.h"
@@ -104,7 +105,15 @@ std::string formatMinutes(double minutes) {
 
 int main() {
     try {
-        globe::Window window(1280, 720, "Globe - Satellite Visualizer");
+        // Persistent settings (observer location, window size) in the per-user
+        // config dir. Missing file = defaults.
+        const std::string configDir = globe::userConfigDir("globe");
+        const std::string settingsPath = configDir + "/settings.cfg";
+        globe::Settings settings = globe::Settings::load(settingsPath);
+        std::fprintf(stderr, "[settings] %s\n", settingsPath.c_str());
+
+        globe::Window window(settings.windowWidth, settings.windowHeight,
+                             "Globe - Satellite Visualizer");
 
         const std::string assets = GLOBE_ASSETS_DIR;
         globe::Shader earthShader(assets + "/shaders/earth.vert", assets + "/shaders/earth.frag");
@@ -118,10 +127,26 @@ int main() {
         globe::TrackRenderer orbitFutureTrack;  // orbit ahead of it
         globe::TrackRenderer shadowPastTrack;   // ground shadow of the past arc
         globe::TrackRenderer shadowFutureTrack; // ground shadow of the future arc
+        globe::TrackRenderer dropLines;         // faint connectors orbit->shadow
         globe::Camera camera;
         globe::UiContext ui(assets);
         globe::SatelliteList satList; // searchable catalog panel (right edge)
         globe::LocationPicker picker; // F2 location chooser (city search / lat,lon)
+
+        // Draw one frame before loading data, so the window shows a message
+        // instead of a blank/white flash while the first fetch + parse runs.
+        {
+            glClearColor(0.02f, 0.03f, 0.06f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            ui.begin(window.width(), window.height());
+            const std::string msg = "Loading satellites...";
+            ui.drawText((static_cast<float>(window.width()) - ui.textWidth(msg)) * 0.5f,
+                        static_cast<float>(window.height()) * 0.5f - ui.lineHeight(),
+                        msg, glm::vec4(0.9f, 0.93f, 1.0f, 1.0f));
+            ui.end();
+            window.swapBuffers();
+            window.pollEvents();
+        }
 
         // Live TLEs from CelesTrak with a 6h disk cache and bundled fallback.
         // Cache lives in a fixed per-user dir (not the working directory).
@@ -129,17 +154,21 @@ int main() {
         const std::string cacheDir = globe::userCacheDir("globe");
         std::fprintf(stderr, "[cache] %s\n", cacheDir.c_str());
         const std::string gp = "https://celestrak.org/NORAD/elements/gp.php?GROUP=";
-        struct Feed { globe::TleGroup group; int cap; };
+        struct Feed { globe::TleGroup group; int cap; glm::vec3 color; const char* label; };
         const std::vector<Feed> feeds = {
-            {{"stations", gp + "stations&FORMAT=tle", assets + "/data/stations.tle"}, 0},
-            {{"gps-ops",  gp + "gps-ops&FORMAT=tle",  assets + "/data/gps-ops.tle"}, 0},
-            {{"starlink", gp + "starlink&FORMAT=tle", assets + "/data/starlink-sample.tle"}, 60},
+            {{"stations", gp + "stations&FORMAT=tle", assets + "/data/stations.tle"}, 0,
+             {1.00f, 0.82f, 0.25f}, "Stations"},
+            {{"gps-ops",  gp + "gps-ops&FORMAT=tle",  assets + "/data/gps-ops.tle"}, 0,
+             {0.45f, 0.90f, 0.55f}, "GPS"},
+            {{"starlink", gp + "starlink&FORMAT=tle", assets + "/data/starlink-sample.tle"}, 60,
+             {1.00f, 0.50f, 0.35f}, "Starlink"},
         };
 
         globe::SatelliteCatalog catalog;
         int loaded = 0;
-        for (const auto& f : feeds) {
-            loaded += catalog.loadTleFile(globe::resolveTleFile(f.group, cacheDir), f.cap);
+        for (std::size_t i = 0; i < feeds.size(); ++i) {
+            loaded += catalog.loadTleFile(globe::resolveTleFile(feeds[i].group, cacheDir),
+                                          feeds[i].cap, static_cast<int>(i));
         }
         std::fprintf(stderr, "[catalog] loaded %d satellites\n", loaded);
 
@@ -174,11 +203,18 @@ int main() {
         bool printedOnce = false;
         bool tabWasDown = false; // edge-detect Tab (toggle list) and Esc
         bool escWasDown = false;
+        bool aboutOpen = false;  // F1 about/controls overlay
+        bool f1WasDown = false;
 
         // Observer location, set via the F2 picker (city search or lat/lon).
         // IP auto-detect comes later.
         struct ObsLoc { double lat = 0.0, lon = 0.0, altKm = 0.0; bool set = false; };
-        ObsLoc observer;
+        ObsLoc observer{settings.obsLat, settings.obsLon, settings.obsAltKm,
+                        settings.hasObserver};
+        if (observer.set) {
+            std::fprintf(stderr, "[settings] observer restored: %.4f, %.4f\n",
+                         observer.lat, observer.lon);
+        }
         bool f2WasDown = false;
         bool enterWasDown = false;
         bool obsDirty = false;    // observer changed; forces a pass recompute
@@ -196,6 +232,13 @@ int main() {
 
             picker.setViewport(window.width(), window.height());
 
+            // F1 toggles the About / controls overlay.
+            bool f1Down = glfwGetKey(w, GLFW_KEY_F1) == GLFW_PRESS;
+            if (f1Down && !f1WasDown) {
+                aboutOpen = !aboutOpen;
+            }
+            f1WasDown = f1Down;
+
             // F2 opens/closes the location picker.
             bool f2Down = glfwGetKey(w, GLFW_KEY_F2) == GLFW_PRESS;
             if (f2Down && !f2WasDown) {
@@ -205,15 +248,18 @@ int main() {
 
             // Tab toggles the catalog list (ignored while the picker is open).
             bool tabDown = glfwGetKey(w, GLFW_KEY_TAB) == GLFW_PRESS;
-            if (tabDown && !tabWasDown && !picker.isOpen()) {
+            if (tabDown && !tabWasDown && !picker.isOpen() && !aboutOpen) {
                 satList.toggleVisible();
             }
             tabWasDown = tabDown;
 
-            // Route typed characters: the picker takes priority, else the search box.
+            // Route typed characters: the picker takes priority, else the search
+            // box (nothing while the About overlay is up).
             std::string typed = window.consumeTypedChars();
             int backspaces = window.consumeBackspaces();
-            if (picker.isOpen()) {
+            if (aboutOpen) {
+                // consumed, ignored
+            } else if (picker.isOpen()) {
                 picker.appendText(typed);
                 picker.backspace(backspaces);
             } else if (satList.visible()) {
@@ -244,10 +290,12 @@ int main() {
             }
             enterWasDown = enterDown;
 
-            // Esc: close the picker, else clear the search filter, else quit.
+            // Esc: close About, else the picker, else clear the filter, else quit.
             bool escDown = glfwGetKey(w, GLFW_KEY_ESCAPE) == GLFW_PRESS;
             if (escDown && !escWasDown) {
-                if (picker.isOpen()) {
+                if (aboutOpen) {
+                    aboutOpen = false;
+                } else if (picker.isOpen()) {
                     picker.close();
                 } else if (satList.visible() && !satList.filterEmpty()) {
                     satList.clearFilter();
@@ -325,7 +373,9 @@ int main() {
 
             // A click over the panel selects a row; otherwise it picks the
             // nearest unobscured marker (or clears the selection).
-            if (pendingPick && picker.isOpen()) {
+            if (pendingPick && aboutOpen) {
+                aboutOpen = false; // any click dismisses the About overlay
+            } else if (pendingPick && picker.isOpen()) {
                 const int row = picker.rowAt(mx, my);
                 if (row >= 0) {
                     const globe::Place* p = picker.results()[static_cast<std::size_t>(row)];
@@ -364,15 +414,13 @@ int main() {
                 }
             }
 
-            // Marker positions for this frame.
-            std::vector<glm::vec3> pts;
-            pts.reserve(catalog.size());
+            // Marker positions grouped by feed, for per-group coloring.
+            std::vector<std::vector<glm::vec3>> groupPts(feeds.size());
             for (const auto& s : catalog.states()) {
-                if (s.valid) {
-                    pts.push_back(s.position);
+                if (s.valid && s.group >= 0 && s.group < static_cast<int>(feeds.size())) {
+                    groupPts[static_cast<std::size_t>(s.group)].push_back(s.position);
                 }
             }
-            markers.setPositions(pts);
 
             std::vector<glm::vec3> selPts;
             if (selectedIndex >= 0) {
@@ -390,15 +438,33 @@ int main() {
             if (selectedIndex >= 0) {
                 globe::SatelliteTrack t =
                     catalog.track(static_cast<std::size_t>(selectedIndex));
-                orbitPastTrack.setPoints(t.orbitPast);
-                orbitFutureTrack.setPoints(t.orbitFuture);
-                shadowPastTrack.setPoints(t.shadowPast);
-                shadowFutureTrack.setPoints(t.shadowFuture);
+                // Fade each arc out from "now": past arcs are bright at their end,
+                // future arcs bright at their start.
+                orbitPastTrack.setPointsFaded(t.orbitPast, false);
+                orbitFutureTrack.setPointsFaded(t.orbitFuture, true);
+                shadowPastTrack.setPointsFaded(t.shadowPast, false);
+                shadowFutureTrack.setPointsFaded(t.shadowFuture, true);
+
+                // Droplines: a few vertical connectors from orbit down to shadow.
+                std::vector<glm::vec3> drops;
+                const std::size_t stride = 12;
+                for (std::size_t i = 0; i < t.orbitPast.size() && i < t.shadowPast.size();
+                     i += stride) {
+                    drops.push_back(t.orbitPast[i]);
+                    drops.push_back(t.shadowPast[i]);
+                }
+                for (std::size_t i = 0; i < t.orbitFuture.size() && i < t.shadowFuture.size();
+                     i += stride) {
+                    drops.push_back(t.orbitFuture[i]);
+                    drops.push_back(t.shadowFuture[i]);
+                }
+                dropLines.setPoints(drops);
             } else {
                 orbitPastTrack.setPoints({});
                 orbitFutureTrack.setPoints({});
                 shadowPastTrack.setPoints({});
                 shadowFutureTrack.setPoints({});
+                dropLines.setPoints({});
             }
 
             // Pass predictions: recompute on selection/observer change, or every
@@ -450,16 +516,20 @@ int main() {
                 trackShader.setMat4("uView", view);
                 trackShader.setMat4("uProj", proj);
 
-                // Ground shadow: a single dark translucent line for both arcs.
-                const glm::vec4 shadow(0.02f, 0.03f, 0.05f, 0.4f);
-                trackShader.setVec4("uColor", shadow);
+                // Ground shadow: dark line, faded from the sub-point.
+                trackShader.setVec4("uColor", glm::vec4(0.02f, 0.03f, 0.05f, 0.6f));
                 shadowPastTrack.draw();
                 shadowFutureTrack.draw();
 
-                // Orbit path: dim where it's been, cyan where it's going.
-                trackShader.setVec4("uColor", glm::vec4(0.45f, 0.52f, 0.62f, 0.7f)); // past
+                // Droplines: faint vertical connectors tying orbit to its shadow.
+                trackShader.setVec4("uColor", glm::vec4(0.5f, 0.6f, 0.72f, 0.22f));
+                dropLines.drawLines();
+
+                // Orbit path: dim where it's been, cyan where it's going (the
+                // per-vertex alpha does the fade, so keep uColor.a high).
+                trackShader.setVec4("uColor", glm::vec4(0.55f, 0.62f, 0.72f, 0.9f)); // past
                 orbitPastTrack.draw();
-                trackShader.setVec4("uColor", glm::vec4(0.35f, 0.85f, 1.0f, 0.95f)); // future
+                trackShader.setVec4("uColor", glm::vec4(0.35f, 0.85f, 1.0f, 1.0f)); // future
                 orbitFutureTrack.draw();
                 glDisable(GL_BLEND);
             }
@@ -468,8 +538,11 @@ int main() {
             markerShader.setMat4("uView", view);
             markerShader.setMat4("uProj", proj);
             markerShader.setFloat("uPointSize", 9.0f);
-            markerShader.setVec3("uColor", glm::vec3(1.0f, 0.85f, 0.2f)); // amber
-            markers.draw();
+            for (std::size_t i = 0; i < feeds.size(); ++i) {
+                markers.setPositions(groupPts[i]);
+                markerShader.setVec3("uColor", feeds[i].color);
+                markers.draw();
+            }
 
             // Selected satellite: a larger cyan dot over its amber marker.
             markerShader.setFloat("uPointSize", 18.0f);
@@ -589,29 +662,102 @@ int main() {
             // Searchable catalog list on the right (Tab toggles it).
             satList.draw(ui, catalog.states(), selectedIndex, hoverRow, glfwGetTime());
 
-            // Observer status (bottom-left).
+            // Marker legend (bottom-left, above the status lines).
             {
                 const glm::vec4 dimc(0.55f, 0.63f, 0.78f, 1.0f);
+                const float lh = ui.lineHeight();
+                const float ly = static_cast<float>(window.height()) - 3.0f * lh - 14.0f;
+                const float sq = lh - 6.0f;
+                float lx = 16.0f;
+                for (const auto& f : feeds) {
+                    ui.drawRect(lx, ly + 2.0f, sq, sq, glm::vec4(f.color, 1.0f));
+                    const float labelX = lx + sq + 6.0f;
+                    ui.drawText(labelX, ly, f.label, dimc);
+                    lx = labelX + ui.textWidth(f.label) + 16.0f;
+                }
+            }
+
+            // Observer status + key hint (bottom-left, two lines).
+            {
+                const glm::vec4 dimc(0.55f, 0.63f, 0.78f, 1.0f);
+                const float lh = ui.lineHeight();
+                const float h = static_cast<float>(window.height());
+                ui.drawText(16.0f, h - 2.0f * lh - 12.0f,
+                            "F1 help   F2 location   Tab list", dimc);
                 char sbuf[96];
                 if (observer.set) {
-                    std::snprintf(sbuf, sizeof(sbuf),
-                                  "Observer  %.2f, %.2f   (F2 to change)",
+                    std::snprintf(sbuf, sizeof(sbuf), "Observer  %.2f, %.2f",
                                   observer.lat, observer.lon);
                 } else {
-                    std::snprintf(sbuf, sizeof(sbuf), "F2: set your location");
+                    std::snprintf(sbuf, sizeof(sbuf), "No location set");
                 }
-                ui.drawText(16.0f,
-                            static_cast<float>(window.height()) - ui.lineHeight() - 10.0f,
-                            sbuf, dimc);
+                ui.drawText(16.0f, h - lh - 10.0f, sbuf, dimc);
             }
 
             // Location picker modal (city search / lat,lon), drawn on top.
             picker.draw(ui, mx, my, glfwGetTime());
 
+            // About / controls overlay (F1), topmost.
+            if (aboutOpen) {
+                const glm::vec4 bg(0.05f, 0.07f, 0.11f, 0.98f);
+                const glm::vec4 accent(0.35f, 0.85f, 1.0f, 1.0f);
+                const glm::vec4 white(0.92f, 0.95f, 1.0f, 1.0f);
+                const glm::vec4 dim(0.60f, 0.68f, 0.82f, 1.0f);
+                struct AboutLine { const char* text; bool header; };
+                static const AboutLine about[] = {
+                    {"Globe - Satellite Visualizer   v" GLOBE_VERSION, false},
+                    {"", false},
+                    {"Controls", true},
+                    {"  Left-drag / arrow keys    rotate the globe", false},
+                    {"  Scroll wheel              zoom in / out", false},
+                    {"  Click a satellite         select it", false},
+                    {"  Tab                       show / hide the list", false},
+                    {"  F2                        set your location", false},
+                    {"  F1 or Esc                 close this", false},
+                    {"", false},
+                    {"Data", true},
+                    {"  Orbital data: CelesTrak (celestrak.org)", false},
+                    {"  City data: GeoNames (geonames.org), CC BY 4.0", false},
+                    {"", false},
+                    {"Built with", true},
+                    {"  GLFW, GLM, GLAD, stb, libsgp4, cpr + libcurl", false},
+                    {"  Full terms: THIRD-PARTY-LICENSES", false},
+                };
+                const int n = static_cast<int>(sizeof(about) / sizeof(about[0]));
+                const float step = ui.lineHeight() + 5.0f;
+                const float padA = 18.0f;
+                const float mw = 480.0f;
+                const float mh = padA * 2.0f + step * static_cast<float>(n);
+                const float mx0 = (static_cast<float>(window.width()) - mw) * 0.5f;
+                const float my0 = (static_cast<float>(window.height()) - mh) * 0.5f;
+                ui.drawRect(mx0, my0, mw, mh, bg);
+                ui.drawRect(mx0, my0, mw, 3.0f, accent);
+                float ty0 = my0 + padA;
+                for (int i = 0; i < n; ++i) {
+                    glm::vec4 c = dim;
+                    if (about[i].header) {
+                        c = accent;
+                    } else if (i == 0) {
+                        c = white;
+                    }
+                    ui.drawText(mx0 + padA, ty0, about[i].text, c);
+                    ty0 += step;
+                }
+            }
+
             ui.end();
 
             window.swapBuffers();
         }
+
+        // Persist settings on a clean exit.
+        settings.hasObserver = observer.set;
+        settings.obsLat = observer.lat;
+        settings.obsLon = observer.lon;
+        settings.obsAltKm = observer.altKm;
+        settings.windowWidth = window.width();
+        settings.windowHeight = window.height();
+        settings.save(settingsPath);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "Fatal: %s\n", e.what());
         return 1;

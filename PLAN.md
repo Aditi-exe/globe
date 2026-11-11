@@ -315,11 +315,11 @@ checker. Drop `assets/textures/earth_day.jpg` (NASA Blue Marble) for the real ma
   latency, curl error reason) to stderr. Verified live: dots load & move.
 
 **Known issues / backlog (flagged during Phase 2, fix later):**
-- **Blank white window until first data loads.** Root cause: the TLE fetch is
-  synchronous on the main thread before the render loop's first frame. Only on a
-  stale/empty cache (first run or >6h later); fresh-cache opens are instant. Fix
-  (per §3.3): draw a loading/splash frame first, then fetch on a background
-  thread and hot-swap the catalog when it arrives.
+- **Blank white window until first data loads.** ✅ PARTLY RESOLVED (2026-11-11):
+  a "Loading satellites..." frame is now drawn before the blocking load, so no
+  white flash. Still synchronous on the main thread, so during a slow cold fetch
+  the window is static/unresponsive. Optional upgrade (per §3.3): fetch on a
+  background thread and hot-swap the catalog when it arrives.
 - **Attribution + licenses (release blocker, Phase 6/7 README + About).** Two
   parts: (1) CelesTrak data credit — "Orbital data courtesy of CelesTrak
   (celestrak.org)", data originates from US Space Force / 18 SDS (already noted
@@ -334,13 +334,13 @@ checker. Drop `assets/textures/earth_day.jpg` (NASA Blue Marble) for the real ma
   100% display scaling; on a scaled/high-DPI monitor picking is off by the scale
   factor and the panel is sized in fb-pixels. Fix: convert cursor coords by
   framebuffer/window ratio (or do picking in NDC directly).
-- **Marker style still 🔵 OPEN FOR REVIEW** (§6). Current: flat amber dots, cyan
-  selection. Revisit size/shape/per-group color once ground tracks land.
-- **Track clarity pass (deferred).** Orbit path + ground shadow work and look
-  good; make the relationship clearer later: faint vertical droplines from orbit
-  to shadow, alpha-fade toward each arc's ends so it doesn't stop abruptly, and
-  tune the shadow lift (currently 10 km) / line width. User: "we'll make it
-  clearer later as a part of the improvements."
+- **Marker style** ✅ RESOLVED (2026-11-11): colored per feed group (Stations
+  amber / GPS green / Starlink orange-red) with a legend; selection cyan. Dot
+  shape/size unchanged (round dots, 9px). Reopen only if per-object-type coloring
+  is wanted later.
+- **Track clarity pass** ✅ RESOLVED (2026-11-11): alpha-fade from "now" + orbit→
+  shadow droplines added. (Shadow lift still 10 km; line width still 1px — tune
+  only if needed.)
 - **Diversify rendered feeds (deferred).** Current globe feeds (stations,
   gps-ops, starlink) are nearly all US payloads, so the info panel's Type/Owner
   are monotonous. Add more CelesTrak GROUPs in `main.cpp` feeds (each capped like
@@ -426,8 +426,29 @@ _(IP-based auto-detect of location deferred — see backlog)_
   Passes cached per selection, recomputed on change or every 5s; display counts
   down live off the cache. Threshold 10°.
 
-**Phase 6 — Polish & release prep**
-Visual polish, settings persistence, About/attribution, packaging.
+**Phase 6 — Polish & release prep** _(in progress)_
+- **Settings persistence ✅ DONE (2026-11-11):** `app/Settings` (new app/ layer)
+  saves observer location + window size to a plain key=value file at
+  `%LOCALAPPDATA%\globe\settings.cfg` (`platform/Paths::userConfigDir`), restored
+  on launch. DEVIATION from §2 "locked SQLite": used a trivial key=value file per
+  §11's "JSON if trivial" — settings are a handful of values; SQLite remains an
+  option if structured data (favorites/history) is added later.
+- **About / controls overlay ✅ DONE (2026-11-11):** F1 opens a centered overlay
+  (`main.cpp`, static text) with version (`GLOBE_VERSION` from CMake), the full
+  control list, and attributions (CelesTrak; GeoNames CC BY 4.0; GLFW/GLM/GLAD/
+  stb/libsgp4/cpr+libcurl). Esc/F1/click closes. Bottom-left shows a key hint.
+  In-app attribution now covered; the bundled THIRD-PARTY-LICENSES *file* is still
+  a Phase 7 packaging task.
+- **Visual polish ✅ DONE (2026-11-11):** (1) loading frame ("Loading
+  satellites...") drawn before the blocking data load, killing the white flash
+  (backlog flag 1 — cheap fix; bg-thread fetch still optional). (2) markers
+  colored per feed group (Stations amber / GPS green / Starlink orange-red) with
+  a bottom-left legend; selection stays cyan (resolves §6 marker-style review).
+  (3) track clarity: orbit/shadow arcs alpha-fade from "now" (per-vertex alpha in
+  TrackRenderer + track shader) + faint droplines connecting orbit to shadow
+  (resolves the deferred track-clarity item).
+- _Still to do:_ packaging (incl. THIRD-PARTY-LICENSES file) — that's Phase 7.
+  Favorites/selection persistence optional.
 
 **Phase 7 — Public release**
 GitHub Release (Windows installer/zip), README with screenshots, optional code

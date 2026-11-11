@@ -39,7 +39,7 @@ struct SatelliteCatalog::Entry {
 SatelliteCatalog::SatelliteCatalog() = default;
 SatelliteCatalog::~SatelliteCatalog() = default;
 
-int SatelliteCatalog::loadTleFile(const std::string& path, int maxCount) {
+int SatelliteCatalog::loadTleFile(const std::string& path, int maxCount, int group) {
     std::ifstream file(path);
     if (!file) {
         std::fprintf(stderr, "[catalog] could not open %s\n", path.c_str());
@@ -61,6 +61,7 @@ int SatelliteCatalog::loadTleFile(const std::string& path, int maxCount) {
             SatelliteState st;
             st.name = n;
             st.norad = static_cast<int>(tle.NoradNumber());
+            st.group = group;
             states_.push_back(std::move(st));
             ++added;
             if (maxCount > 0 && added >= maxCount) {

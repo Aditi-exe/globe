@@ -10,4 +10,10 @@ namespace globe {
 // user location can be resolved. Stable regardless of where the exe is launched.
 std::string userCacheDir(const std::string& appName);
 
+// Absolute path to a per-user config directory for this app (for settings that
+// should persist, unlike the disposable cache). Windows: %LOCALAPPDATA%\<appName>.
+// POSIX: $XDG_CONFIG_HOME/<appName> or ~/.config/<appName>. Falls back to the
+// current directory only if no user location can be resolved.
+std::string userConfigDir(const std::string& appName);
+
 } // namespace globe
