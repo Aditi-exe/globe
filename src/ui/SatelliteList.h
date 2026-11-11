@@ -19,6 +19,12 @@ public:
     void toggleVisible() { visible_ = !visible_; }
     [[nodiscard]] bool visible() const { return visible_; }
 
+    void toggleMinimized() { minimized_ = !minimized_; }
+    [[nodiscard]] bool minimized() const { return minimized_; }
+
+    // True if (px,py) is on the panel's header bar (the collapse/expand strip).
+    [[nodiscard]] bool hitHeader(double px, double py) const;
+
     // Search-box editing, fed from the window's text-entry queue.
     void appendText(const std::string& s);
     void backspace(int count);
@@ -41,8 +47,9 @@ public:
 
 private:
     struct Layout {
-        float x, y, w, h;   // panel rect
-        float rowsTop;      // first row's top (below the search box)
+        float x, y, w, h;   // panel rect (header only, when minimized)
+        float headerH;      // top bar with the title + collapse control
+        float rowsTop;      // first row's top (below header + search box)
         float rowsH;        // height of the scrollable rows area
         float rowH;         // per-row height
     };
@@ -52,6 +59,7 @@ private:
     int screenW_ = 0;
     int screenH_ = 0;
     bool visible_ = true;
+    bool minimized_ = false;
     std::string filter_;
     float scroll_ = 0.0f;
     std::vector<int> filtered_; // indices into the catalog's states()

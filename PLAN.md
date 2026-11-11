@@ -327,7 +327,8 @@ checker. Drop `assets/textures/earth_day.jpg` (NASA Blue Marble) for the real ma
   GLFW (zlib), GLM (MIT), GLAD (MIT), stb (MIT/public domain), libsgp4
   (Apache-2.0), cpr + libcurl (MIT/curl). Ship a bundled THIRD-PARTY-LICENSES
   file + a credits section. Don't forget #2 — it's a legal requirement, not just
-  courtesy.
+  courtesy. (3) **GeoNames city data — CC BY 4.0** (used for location search):
+  must credit "GeoNames (geonames.org)" in About/credits + THIRD-PARTY-LICENSES.
 - **High-DPI cursor scaling.** `pickSatellite` and the UI overlay work in
   framebuffer pixels, but `glfwGetCursorPos` returns window coords. Identical at
   100% display scaling; on a scaled/high-DPI monitor picking is off by the scale
@@ -355,6 +356,11 @@ checker. Drop `assets/textures/earth_day.jpg` (NASA Blue Marble) for the real ma
   (`%LOCALAPPDATA%\globe\cache\`, XDG/`~/.cache/globe` elsewhere) via
   `platform/Paths.cpp userCacheDir()`, no longer working-dir-relative. Note the
   Starlink cache file is ~1.8 MB (full feed) though we only render 60.
+- **IP-based location auto-detect (deferred from Phase 5).** §7/§16.4 wanted both
+  manual entry (done) and IP auto-detect on first run. Needs a keyless/low-
+  friction geolocation endpoint (TBD) and an outbound call at startup — flag it
+  to the user like the other network calls. Manual city/lat-lon entry covers the
+  need for now.
 - _(flag 2 — TBD)_
 
 **Phase 3 — Live markers + selection + UI foundation** ✅ **DONE (2026-11-10)**
@@ -393,9 +399,32 @@ than falling back to ImGui. Revisit only if a later widget proves too costly.
   `consumeTypedChars`/`consumeBackspaces`). Scroll/drag route to the list when the
   cursor is over it, else to the camera.
 
-**Phase 5 — Location & pass predictions**
-Observer location (manual entry first; auto later), overhead-now, AOS/LOS pass
-windows.
+**Phase 5 — Location & pass predictions** ✅ **DONE (2026-11-11)**
+_(IP-based auto-detect of location deferred — see backlog)_
+- **Engine + location + overhead-now ✅ DONE (2026-11-10):** `SatelliteCatalog`
+  gained `lookAngle()` (libsgp4 `Observer::GetLookAngle` → az/el/range) and
+  `predictPasses()` (steps SGP4 forward ≤48h, bisection-refined horizon crossings
+  → AOS/LOS/max-el, soonest first). Manual location entry via **F2** (type
+  "lat, lon", Enter to set, parsed with `std::stod`); observer status shown
+  bottom-left. Info panel shows Az/El/Range (up/below horizon) when a location is
+  set. NOTE deviation from §5: look-angle/pass logic lives on SatelliteCatalog
+  (SGP4 propagators are private there), not standalone Observer/PassPredictor.
+  Location not persisted (Phase 6).
+- **Location search (city gazetteer) ✅ DONE (2026-11-11):** F2 now opens a
+  modal (`ui/LocationPicker`) that searches a bundled **GeoNames** city dump
+  (`domain/Gazetteer` loads `assets/data/cities15000.txt`, name search ranked
+  exact→prefix→substring then by population) — type a city, click a result, or
+  type raw "lat, lon". Graceful fallback to lat/lon entry if the file is absent
+  (not committed; see assets/data/README). GeoNames = CC BY (attribution added to
+  backlog).
+- **Satellite list minimizable ✅ DONE (2026-11-11):** the catalog panel has a
+  header bar ("Satellites (N)") with a collapse control; click it to shrink to
+  the bar, click to expand. Tab still fully hides it.
+- **Pass display ✅ DONE (2026-11-11):** info panel shows the next ≤3 passes for
+  the selected satellite from the observer — AOS countdown · duration · max
+  elevation (in-progress pass shows "now LOS in …"; none → "No pass in 48h").
+  Passes cached per selection, recomputed on change or every 5s; display counts
+  down live off the cache. Threshold 10°.
 
 **Phase 6 — Polish & release prep**
 Visual polish, settings persistence, About/attribution, packaging.

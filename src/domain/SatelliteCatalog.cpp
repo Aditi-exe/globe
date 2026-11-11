@@ -2,14 +2,17 @@
 
 #include "domain/CoordTransforms.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <string>
 
 #include "CoordGeodetic.h"
+#include "CoordTopocentric.h"
 #include "DateTime.h"
 #include "Eci.h"
+#include "Observer.h"
 #include "SGP4.h"
 #include "Tle.h"
 
@@ -17,6 +20,7 @@ namespace globe {
 
 namespace {
 constexpr double kRadToDeg = 57.29577951308232;
+constexpr double kDegToRad = 0.017453292519943295;
 
 std::string trim(const std::string& s) {
     size_t a = s.find_first_not_of(" \t\r\n");
@@ -118,6 +122,103 @@ SatelliteTrack SatelliteCatalog::track(std::size_t index, int samplesPerArc) con
                track.orbitFuture, track.shadowFuture);
     }
     return track;
+}
+
+LookAngle SatelliteCatalog::lookAngle(std::size_t index, double obsLatDeg,
+                                      double obsLonDeg, double obsAltKm) const {
+    LookAngle la;
+    if (index >= entries_.size()) {
+        return la;
+    }
+    libsgp4::Observer obs(obsLatDeg, obsLonDeg, obsAltKm);
+    const libsgp4::DateTime now = libsgp4::DateTime::Now(true);
+    try {
+        libsgp4::Eci eci = entries_[index]->sgp4.FindPosition(now);
+        libsgp4::CoordTopocentric topo = obs.GetLookAngle(eci);
+        la.azDeg = topo.azimuth * kRadToDeg;
+        la.elDeg = topo.elevation * kRadToDeg;
+        la.rangeKm = topo.range;
+        la.rangeRateKmS = topo.rangeRate;
+        la.aboveHorizon = topo.elevation > 0.0;
+        la.valid = true;
+    } catch (const std::exception&) {
+        la.valid = false;
+    }
+    return la;
+}
+
+std::vector<Pass> SatelliteCatalog::predictPasses(std::size_t index, double obsLatDeg,
+                                                  double obsLonDeg, double obsAltKm,
+                                                  int maxPasses, double horizonDeg) const {
+    std::vector<Pass> passes;
+    if (index >= entries_.size() || maxPasses < 1) {
+        return passes;
+    }
+    libsgp4::Observer obs(obsLatDeg, obsLonDeg, obsAltKm);
+    const libsgp4::DateTime start = libsgp4::DateTime::Now(true);
+    const double horizonRad = horizonDeg * kDegToRad;
+    const double stepMin = 0.5;        // 30 s coarse search step
+    const double horizonMin = 48.0 * 60.0;
+    const libsgp4::SGP4& sgp4 = entries_[index]->sgp4;
+
+    // Elevation (radians) at `minFromNow`; well below the horizon if propagation
+    // fails (treated as "not visible" so a decayed sat just yields no passes).
+    auto elevAt = [&](double minFromNow) -> double {
+        try {
+            libsgp4::Eci eci = sgp4.FindPosition(start.AddMinutes(minFromNow));
+            return obs.GetLookAngle(eci).elevation;
+        } catch (const std::exception&) {
+            return -1.5708; // ~-90 deg
+        }
+    };
+
+    // Bisect between a (below horizon) and b (above horizon) for the crossing.
+    auto refineCross = [&](double a, double b) -> double {
+        for (int i = 0; i < 12; ++i) {
+            const double m = 0.5 * (a + b);
+            if (elevAt(m) > horizonRad) {
+                b = m;
+            } else {
+                a = m;
+            }
+        }
+        return 0.5 * (a + b);
+    };
+
+    double prevT = 0.0;
+    double prevEl = elevAt(0.0);
+    bool above = prevEl > horizonRad;
+    double aosT = above ? 0.0 : -1.0;
+    double maxEl = above ? prevEl : -1.5708;
+    const bool startedAbove = above;
+
+    for (double t = stepMin; t <= horizonMin && static_cast<int>(passes.size()) < maxPasses;
+         t += stepMin) {
+        const double el = elevAt(t);
+        if (!above && el > horizonRad) {
+            // Rising edge: AOS between prevT and t.
+            aosT = refineCross(prevT, t);
+            above = true;
+            maxEl = el;
+        } else if (above && el <= horizonRad) {
+            // Falling edge: LOS between prevT and t.
+            const double losT = refineCross(t, prevT); // a=below(t), b=above(prevT)
+            Pass p;
+            p.aosMinFromNow = aosT < 0.0 ? 0.0 : aosT;
+            p.losMinFromNow = losT;
+            p.maxElDeg = maxEl * kRadToDeg;
+            p.durationMin = losT - p.aosMinFromNow;
+            p.inProgress = (aosT <= 0.0) && startedAbove && passes.empty();
+            passes.push_back(p);
+            above = false;
+            maxEl = -1.5708;
+        } else if (above) {
+            maxEl = std::max(maxEl, el);
+        }
+        prevT = t;
+        prevEl = el;
+    }
+    return passes;
 }
 
 void SatelliteCatalog::updateNow() {

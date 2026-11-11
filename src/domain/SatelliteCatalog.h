@@ -32,6 +32,27 @@ struct SatelliteTrack {
     std::vector<glm::vec3> shadowFuture;
 };
 
+// Where a satellite is in the observer's sky right now.
+struct LookAngle {
+    double azDeg = 0.0;        // compass bearing, 0 = north, 90 = east
+    double elDeg = 0.0;        // angle above the horizon (negative = below)
+    double rangeKm = 0.0;      // straight-line distance to the satellite
+    double rangeRateKmS = 0.0; // closing (<0) or receding (>0) speed
+    bool aboveHorizon = false; // elDeg > 0
+    bool valid = false;        // false if propagation failed
+};
+
+// One visible pass over the observer. Times are minutes from the moment the
+// prediction was computed (so a caller showing a live countdown subtracts the
+// elapsed time since then).
+struct Pass {
+    double aosMinFromNow = 0.0; // acquisition of signal (rises above horizon)
+    double losMinFromNow = 0.0; // loss of signal (sets below horizon)
+    double maxElDeg = 0.0;      // highest elevation reached during the pass
+    double durationMin = 0.0;   // los - aos
+    bool inProgress = false;    // true if the satellite is already up now
+};
+
 // Holds a set of satellites parsed from CelesTrak TLE files and propagates them
 // with SGP4. libsgp4 types are kept out of this header (pimpl-style Entry).
 class SatelliteCatalog {
@@ -56,6 +77,20 @@ public:
     // empty arcs on a bad index or if propagation fails.
     [[nodiscard]] SatelliteTrack track(std::size_t index,
                                        int samplesPerArc = 120) const;
+
+    // Where satellite `index` sits in the sky for an observer at the given
+    // geodetic location (degrees, km) right now.
+    [[nodiscard]] LookAngle lookAngle(std::size_t index, double obsLatDeg,
+                                      double obsLonDeg, double obsAltKm) const;
+
+    // The next passes of satellite `index` over that observer, searching forward
+    // up to ~48h. A pass is time spent above `horizonDeg`. Returns at most
+    // `maxPasses`, soonest first (a pass already in progress is included with
+    // aos at/near 0 and inProgress = true).
+    [[nodiscard]] std::vector<Pass> predictPasses(std::size_t index,
+                                                  double obsLatDeg, double obsLonDeg,
+                                                  double obsAltKm, int maxPasses = 3,
+                                                  double horizonDeg = 10.0) const;
 
     [[nodiscard]] const std::vector<SatelliteState>& states() const { return states_; }
     [[nodiscard]] std::size_t size() const { return states_.size(); }

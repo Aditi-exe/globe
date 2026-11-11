@@ -159,11 +159,13 @@ add_executable(globe
     src/domain/CoordTransforms.cpp
     src/domain/SatelliteCatalog.cpp
     src/domain/Satcat.cpp
+    src/domain/Gazetteer.cpp
     src/net/TleSource.cpp
     src/net/SatcatSource.cpp
     src/ui/TextRenderer.cpp
     src/ui/UiContext.cpp
-    src/ui/SatelliteList.cpp)
+    src/ui/SatelliteList.cpp
+    src/ui/LocationPicker.cpp)
 
 target_include_directories(globe PRIVATE src ${stb_SOURCE_DIR} ${sgp4_SOURCE_DIR}/libsgp4)
 target_compile_definitions(globe PRIVATE
