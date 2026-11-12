@@ -32,6 +32,12 @@ set(CMAKE_SKIP_INSTALL_RULES ON)
 
 include(FetchContent)
 
+# Don't re-run each dependency's git "update" step on reconfigure. Deps pinned to
+# a moving ref (stb/sgp4 at master) otherwise try to pull on every reconfigure,
+# which can fail to re-apply/update a populated checkout. Once fetched, leave them
+# as-is. (Proper fix later: pin stb/sgp4 to specific commits.)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+
 # ---------------------------------------------------------------------------
 # Dependencies (Phase 0): fetched & built at configure time via FetchContent.
 # No system install needed; sources land in the build directory. Requires
@@ -64,22 +70,21 @@ FetchContent_Declare(glad
     SOURCE_SUBDIR cmake)
 
 # stb - single-header image loader (the repo has no CMakeLists, so MakeAvailable
-# just populates it and sets stb_SOURCE_DIR).
-# TODO: pin GIT_TAG to a specific commit for reproducibility before release.
+# just populates it and sets stb_SOURCE_DIR). Pinned to a specific commit for
+# reproducibility (a moving `master` makes FetchContent try to rebase on every
+# reconfigure, which fails on a populated checkout).
 FetchContent_Declare(stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
-    GIT_TAG master
-    GIT_SHALLOW TRUE)
+    GIT_TAG 4e9b368bfc071e97206ea5c6adba68dd0cbf8897)
 
 # libsgp4 - SGP4/SDP4 orbit propagation (dnwrnr/sgp4). Its bundled CMake isn't
 # consumable as a subproject, so we fetch the sources and compile them ourselves.
 # SOURCE_SUBDIR points at the repo's cmake/ dir (no CMakeLists.txt) so
-# MakeAvailable populates without add_subdirectory.
-# TODO: pin GIT_TAG to a specific commit for reproducibility before release.
+# MakeAvailable populates without add_subdirectory. Pinned to a specific commit
+# for reproducibility (see the stb note above).
 FetchContent_Declare(sgp4
     GIT_REPOSITORY https://github.com/dnwrnr/sgp4.git
-    GIT_TAG master
-    GIT_SHALLOW TRUE
+    GIT_TAG b915de601a4af0a9c1c61c54efaafb168ba3defb
     SOURCE_SUBDIR cmake)
 
 # cpr - C++ Requests (HTTP) for fetching live TLEs from CelesTrak. It pulls in

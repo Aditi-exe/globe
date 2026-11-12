@@ -447,8 +447,21 @@ _(IP-based auto-detect of location deferred — see backlog)_
   (3) track clarity: orbit/shadow arcs alpha-fade from "now" (per-vertex alpha in
   TrackRenderer + track shader) + faint droplines connecting orbit to shadow
   (resolves the deferred track-clarity item).
-- _Still to do:_ packaging (incl. THIRD-PARTY-LICENSES file) — that's Phase 7.
-  Favorites/selection persistence optional.
+- **Atmosphere glow — TRIED & REMOVED (2026-11-12).** Three attempts (fresnel
+  rim shell, screen-space radial halo, sun-side crescent) all read as an "ugly
+  blue ring/outline" to the user, so the glow was removed entirely. Any future
+  atmosphere should likely be real bloom/post-processing, not a rim. (The dep-pin
+  CMake fix below came out of this and was kept.)
+- **Build: stb/sgp4 pinned to commits ✅ (2026-11-12).** Were GIT_TAG master →
+  FetchContent rebased them on every reconfigure and stb's checkout self-
+  conflicted. Pinned (stb 4e9b368, sgp4 b915de6) + `FETCHCONTENT_UPDATES_DISCONNECTED`.
+- **UI "mission-control" restyle — TRIED & REVERTED (2026-11-11).** User felt the
+  current look is clunky; built a full monospace amber-HUD restyle, but they
+  preferred the existing look slightly and want to revisit aesthetics later. The
+  look/feel is still OPEN — crisp text (packed/oversampled atlas) is the known
+  high-value change to retry in whatever direction we pick.
+- _Still to do:_ revisit aesthetics (open); packaging (incl. THIRD-PARTY-LICENSES
+  file) — Phase 7. Favorites/selection persistence optional.
 
 **Phase 7 — Public release**
 GitHub Release (Windows installer/zip), README with screenshots, optional code
@@ -473,6 +486,30 @@ signing, later a GitHub Pages download page.
 
 ## 15. Explicitly deferred / future
 
+- **Naked-eye visibility ("can I see it tonight?") — PLANNED FEATURE, build after
+  Phase 7** (decided 2026-11-12; extends the Phase 5 observer/sky work). Compute
+  the maximal set:
+  1. **Sunlit** — satellite not in Earth's shadow. Sun position from libsgp4
+     `SolarPosition::FindPosition(now)` → `Eci` (same ECI frame as the sat's SGP4
+     position). Use the **conical** umbra+penumbra model (not just cylindrical) so
+     "fully lit / penumbra / umbra" is known. Cheap: one Sun lookup per frame for
+     all sats. Sunlit is a GLOBAL property (no observer needed).
+  2. **Observer darkness** — Sun's elevation at the observer via
+     `Observer::GetLookAngle(sunEci)`, classified day / civil −6 / nautical −12 /
+     astronomical −18 / night.
+  3. **Above observer horizon** — already have (lookAngle elevation).
+  4. **Phase angle** — Sun–satellite–observer angle (how "full" the lit face we
+     see is). Pure geometry.
+  5. **Shadow entry/exit during a pass** — when in a pass it crosses in/out of the
+     shadow (the fade-in / fade-out moment); fold into `predictPasses`.
+  6. **Approximate brightness** (user opted IN, label clearly as an estimate):
+     true magnitude needs size/albedo we don't have, so use SATCAT **RCS**
+     (SMALL/MEDIUM/LARGE) + range + phase angle for a crude brightness/ranking.
+  Surface: a global `sunlit` flag (brighter markers + panel line) and, when F2
+  location is set, a combined verdict — `VISIBLE NOW` / `sunlit (daytime at you)`
+  / `in shadow` / `below horizon` — plus the approx brightness. Implement as a
+  domain `Visibility` calc (sun pos, conical shadow, phase angle), then wire into
+  SatelliteState/panel/markers, then shadow-events + RCS brightness.
 - `RemoteProvider` (optional server for TLE caching / proxying) — only if a
   feature demands it; needs no real DB even then.
 - Full ~10k active catalog as 3D markers (instanced rendering + LOD/culling).
