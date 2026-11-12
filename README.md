@@ -88,6 +88,6 @@ README into `dist/globe-<version>-win64/`, and zips it.
 
 ## License
 
-globe is released under the [MIT License](LICENSE) — © 2026 Aditi Sathe
+globe is released under the [MIT License](LICENSE) — © 2026 Aditi S.
 (Aditi-exe). Bundled third-party libraries retain their own licenses
 (see `THIRD-PARTY-LICENSES.txt`).
