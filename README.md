@@ -8,8 +8,7 @@ tracks, a searchable catalog, and overhead/pass predictions for your location.
 No account, no server, no telemetry. The only network traffic is fetching
 public orbital data from CelesTrak (cached locally for hours).
 
-![globe](docs/screenshot.png)
-<!-- Add docs/screenshot.png before publishing the release. -->
+![Globe satellite visualizer — satellites over a 3D Earth with an info panel](docs/screenshot.png)
 
 ## Download & run (Windows)
 
