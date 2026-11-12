@@ -4,6 +4,14 @@
 #include <filesystem>
 #include <string>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace globe {
@@ -65,6 +73,39 @@ std::string userConfigDir(const std::string& appName) {
     }
 #endif
     return fs::current_path().string();
+}
+
+std::string exeDir() {
+#if defined(_WIN32)
+    std::wstring buf(MAX_PATH, L'\0');
+    for (;;) {
+        DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        if (n == 0) {
+            return {};
+        }
+        if (n < buf.size()) {
+            buf.resize(n);
+            break;
+        }
+        buf.resize(buf.size() * 2); // path longer than the buffer; grow and retry
+    }
+    return fs::path(buf).parent_path().string();
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buf(size, '\0');
+    if (_NSGetExecutablePath(buf.data(), &size) != 0) {
+        return {};
+    }
+    return fs::weakly_canonical(fs::path(buf)).parent_path().string();
+#else
+    std::error_code ec;
+    fs::path p = fs::read_symlink("/proc/self/exe", ec);
+    if (ec) {
+        return {};
+    }
+    return p.parent_path().string();
+#endif
 }
 
 } // namespace globe

@@ -467,6 +467,23 @@ _(IP-based auto-detect of location deferred — see backlog)_
 GitHub Release (Windows installer/zip), README with screenshots, optional code
 signing, later a GitHub Pages download page.
 
+_Progress (2026-11-12):_ portable-zip packaging DONE.
+- Runtime asset loading fixed: `platform/Paths::exeDir()` + `main.cpp` resolves
+  `assets/` beside the exe, falling back to compile-time `GLOBE_ASSETS_DIR` for
+  dev runs (the former made a copied exe unrunnable off this machine).
+- `THIRD-PARTY-LICENSES.txt` (repo root) — verbatim GLFW/GLM/GLAD/stb/libsgp4/
+  cpr/libcurl licenses + CelesTrak/GeoNames(CC BY)/NASA data attributions.
+- `README.md` rewritten (download/run, SmartScreen note, controls, attribution,
+  build-from-source). Needs `docs/screenshot.png` before publishing.
+- `scripts/package.ps1` — builds Release in the existing `build/` tree (no
+  re-fetch), stages exe + runtime assets + app-local VC143 CRT DLLs + licenses +
+  README into `dist/globe-<ver>-win64/`, zips it (~4.7 MB). `dist/` gitignored.
+- Self-contained: /MD build + bundled CRT DLLs → no VC++ redist install needed.
+  Code signing skipped for v1 (SmartScreen "Run anyway", documented).
+- NOT run by me (first launch hits CelesTrak). User to smoke-test the unzipped
+  exe. Still open before going public: add a LICENSE file (PLAN says MIT but no
+  file committed), capture a screenshot, create the GitHub Release + upload zip.
+
 ---
 
 ## 14. Distribution & going public

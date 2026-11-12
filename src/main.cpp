@@ -32,6 +32,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <exception>
+#include <filesystem>
 #include <string>
 #include <utility>
 #include <vector>
@@ -115,7 +116,15 @@ int main() {
         globe::Window window(settings.windowWidth, settings.windowHeight,
                              "Globe - Satellite Visualizer");
 
-        const std::string assets = GLOBE_ASSETS_DIR;
+        // Locate assets. In a packaged build they sit next to the executable
+        // (assets/ beside globe.exe); for dev runs launched from the build dir
+        // that folder won't exist, so fall back to the source tree baked in at
+        // compile time (GLOBE_ASSETS_DIR).
+        std::string assets = globe::exeDir() + "/assets";
+        if (!std::filesystem::exists(std::filesystem::path(assets) / "shaders" / "earth.vert")) {
+            assets = GLOBE_ASSETS_DIR;
+        }
+        std::fprintf(stderr, "[assets] %s\n", assets.c_str());
         globe::Shader earthShader(assets + "/shaders/earth.vert", assets + "/shaders/earth.frag");
         globe::Shader markerShader(assets + "/shaders/marker.vert", assets + "/shaders/marker.frag");
         globe::Shader trackShader(assets + "/shaders/track.vert", assets + "/shaders/track.frag");

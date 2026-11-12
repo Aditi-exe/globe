@@ -16,4 +16,10 @@ std::string userCacheDir(const std::string& appName);
 // current directory only if no user location can be resolved.
 std::string userConfigDir(const std::string& appName);
 
+// Absolute path to the directory containing the running executable (not the
+// working directory). Used to locate bundled assets in a packaged build, where
+// the app is launched by double-click from an arbitrary folder. Returns "" if
+// the path can't be determined.
+std::string exeDir();
+
 } // namespace globe
