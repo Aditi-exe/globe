@@ -11,6 +11,8 @@ namespace globe {
 UiContext::UiContext(const std::string& assetsDir) {
     rectShader_ = std::make_unique<Shader>(assetsDir + "/shaders/ui_rect.vert",
                                            assetsDir + "/shaders/ui_rect.frag");
+    imageShader_ = std::make_unique<Shader>(assetsDir + "/shaders/ui_image.vert",
+                                            assetsDir + "/shaders/ui_image.frag");
     text_ = std::make_unique<TextRenderer>(assetsDir);
 
     glGenVertexArrays(1, &vao_);
@@ -21,11 +23,26 @@ UiContext::UiContext(const std::string& assetsDir) {
                           reinterpret_cast<void*>(0));
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
+
+    // Separate VAO/VBO for textured quads: interleaved pos(2) + uv(2).
+    glGenVertexArrays(1, &imageVao_);
+    glGenBuffers(1, &imageVbo_);
+    glBindVertexArray(imageVao_);
+    glBindBuffer(GL_ARRAY_BUFFER, imageVbo_);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          reinterpret_cast<void*>(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
 }
 
 UiContext::~UiContext() {
     if (vbo_) glDeleteBuffers(1, &vbo_);
     if (vao_) glDeleteVertexArrays(1, &vao_);
+    if (imageVbo_) glDeleteBuffers(1, &imageVbo_);
+    if (imageVao_) glDeleteVertexArrays(1, &imageVao_);
 }
 
 void UiContext::begin(int width, int height) {
@@ -74,12 +91,38 @@ void UiContext::drawRect(float x, float y, float w, float h, const glm::vec4& co
     glBindVertexArray(0);
 }
 
-void UiContext::drawText(float x, float y, const std::string& text, const glm::vec4& color) {
-    text_->draw(proj_, x, y, text, color);
+void UiContext::drawImage(unsigned int texture, float x, float y, float w, float h,
+                          const glm::vec4& tint, float u0, float v0, float u1, float v1) {
+    const float verts[6][4] = {
+        {x,     y,     u0, v0},
+        {x + w, y,     u1, v0},
+        {x + w, y + h, u1, v1},
+        {x,     y,     u0, v0},
+        {x + w, y + h, u1, v1},
+        {x,     y + h, u0, v1},
+    };
+    imageShader_->use();
+    imageShader_->setMat4("uProj", proj_);
+    imageShader_->setVec4("uTint", tint);
+    imageShader_->setInt("uTex", 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glBindVertexArray(imageVao_);
+    glBindBuffer(GL_ARRAY_BUFFER, imageVbo_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
 }
 
-float UiContext::textWidth(const std::string& text) const { return text_->measure(text); }
-float UiContext::lineHeight() const { return text_->lineHeight(); }
+void UiContext::drawText(float x, float y, const std::string& text, const glm::vec4& color,
+                         float scale) {
+    text_->draw(proj_, x, y, text, color, scale);
+}
+
+float UiContext::textWidth(const std::string& text, float scale) const {
+    return text_->measure(text) * scale;
+}
+float UiContext::lineHeight(float scale) const { return text_->lineHeight() * scale; }
 bool UiContext::textReady() const { return text_->ready(); }
 
 } // namespace globe

@@ -174,9 +174,14 @@ add_executable(globe
     src/ui/LocationPicker.cpp)
 
 target_include_directories(globe PRIVATE src ${stb_SOURCE_DIR} ${sgp4_SOURCE_DIR}/libsgp4)
+# GLOBE_ASSETS_DIR is only the *fallback* used when assets aren't found next to
+# the executable (see main.cpp). In Debug it points at the source tree so a dev
+# can run build/Debug/globe.exe directly. In Release it's just "assets"
+# (relative) so the absolute build-machine path isn't baked into a distributed
+# binary — a packaged build always finds its assets beside the exe anyway.
 target_compile_definitions(globe PRIVATE
     GLFW_INCLUDE_NONE
-    GLOBE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    GLOBE_ASSETS_DIR="$<IF:$<CONFIG:Debug>,${CMAKE_CURRENT_SOURCE_DIR}/assets,assets>"
     GLOBE_VERSION="${PROJECT_VERSION}")
 target_link_libraries(globe PRIVATE glfw glm::glm glad_gl_core_33 sgp4 cpr::cpr)
 

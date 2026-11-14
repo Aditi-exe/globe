@@ -28,11 +28,13 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -102,6 +104,136 @@ std::string formatMinutes(double minutes) {
     return b;
 }
 
+// A small, borderless, centered splash window with its OWN GL context and UI.
+// Shown while data loads, then torn down before the main window is created.
+// (A separate context is needed because GL container objects like VAOs aren't
+// shared between contexts, so the main window's UiContext can't be reused here.)
+// It never calls glfwTerminate -- the main window still needs GLFW afterward.
+class Splash {
+public:
+    Splash(const std::string& assets, int w, int h) : w_(w), h_(h) {
+        if (!glfwInit()) {
+            return; // no splash; the caller still loads data and opens the main window
+        }
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+        glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);  // borderless
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);    // stay on top
+        win_ = glfwCreateWindow(w_, h_, "globe", nullptr, nullptr);
+        glfwDefaultWindowHints(); // restore defaults so the main window is normal
+        if (!win_) {
+            return;
+        }
+        if (GLFWmonitor* mon = glfwGetPrimaryMonitor()) { // center on the work area
+            int mx = 0, my = 0, mw = 0, mh = 0;
+            glfwGetMonitorWorkarea(mon, &mx, &my, &mw, &mh);
+            glfwSetWindowPos(win_, mx + (mw - w_) / 2, my + (mh - h_) / 2);
+        }
+        glfwMakeContextCurrent(win_);
+        if (!gladLoadGL(glfwGetProcAddress)) {
+            glfwDestroyWindow(win_);
+            win_ = nullptr;
+            return;
+        }
+        glfwSwapInterval(1);
+        ui_ = std::make_unique<globe::UiContext>(assets);
+        // Background photo for the splash (satellite over Earth at night).
+        bg_ = std::make_unique<globe::Texture>(assets + "/textures/startsplashscreen.jpg");
+    }
+
+    ~Splash() {
+        bg_.reset();
+        ui_.reset(); // free GL objects while this context is still current
+        if (win_) {
+            glfwMakeContextCurrent(nullptr);
+            glfwDestroyWindow(win_);
+        }
+    }
+
+    Splash(const Splash&) = delete;
+    Splash& operator=(const Splash&) = delete;
+
+    [[nodiscard]] bool ok() const { return win_ != nullptr && ui_ != nullptr; }
+
+    // Draw one minimal splash frame and present it: the dimmed world-map
+    // background, the app name centered, the version in the bottom-right, and a
+    // small "loading" note bottom-left while `status` is non-empty.
+    void show(const std::string& version, const std::string& status) {
+        if (!ok()) {
+            return;
+        }
+        int fbw = 0, fbh = 0;
+        glfwGetFramebufferSize(win_, &fbw, &fbh);
+        glViewport(0, 0, fbw, fbh);
+        glClearColor(0.01f, 0.02f, 0.04f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        ui_->begin(w_, h_);
+
+        const float W = static_cast<float>(w_);
+        const float H = static_cast<float>(h_);
+        const float m = 16.0f; // edge margin
+
+        // Background photo. The window matches the image's aspect, so a full
+        // 0..1 draw fills it without stretching; the cover math below also keeps
+        // it correct if the window size is ever changed.
+        if (bg_) {
+            const float imgAspect = 612.0f / 383.0f; // startsplashscreen.jpg
+            const float winAspect = W / H;
+            float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+            if (winAspect < imgAspect) {
+                const float uw = winAspect / imgAspect; // crop left/right
+                u0 = (1.0f - uw) * 0.5f;
+                u1 = 1.0f - u0;
+            } else {
+                const float vh = imgAspect / winAspect; // crop top/bottom
+                v0 = (1.0f - vh) * 0.5f;
+                v1 = 1.0f - v0;
+            }
+            ui_->drawImage(bg_->id(), 0.0f, 0.0f, W, H, glm::vec4(1.0f), u0, v0, u1, v1);
+        }
+        // Thin edge so the borderless window has a defined border.
+        const glm::vec4 edge(0.30f, 0.55f, 0.75f, 0.85f);
+        ui_->drawRect(0.0f, 0.0f, W, 2.0f, edge);
+        ui_->drawRect(0.0f, H - 2.0f, W, 2.0f, edge);
+        ui_->drawRect(0.0f, 0.0f, 2.0f, H, edge);
+        ui_->drawRect(W - 2.0f, 0.0f, 2.0f, H, edge);
+
+        // Text with a soft shadow so it stays legible over the photo.
+        auto label = [&](float x, float y, const std::string& s, const glm::vec4& c, float scale) {
+            ui_->drawText(x + 1.5f, y + 1.5f, s, glm::vec4(0.0f, 0.0f, 0.0f, 0.65f * c.a), scale);
+            ui_->drawText(x, y, s, c, scale);
+        };
+
+        // App name, top-left over the dark sky.
+        label(m, m, "Satellite Viewer", glm::vec4(0.96f, 0.98f, 1.00f, 1.0f), 1.8f);
+
+        // Version, bottom-right.
+        const std::string ver = "v" + version;
+        label(W - ui_->textWidth(ver) - m, H - ui_->lineHeight() - m * 0.6f, ver,
+              glm::vec4(0.85f, 0.90f, 0.98f, 0.95f), 1.0f);
+
+        // Loading note, bottom-left (only while loading).
+        if (!status.empty()) {
+            label(m, H - ui_->lineHeight() - m * 0.6f, status,
+                  glm::vec4(0.85f, 0.90f, 0.98f, 0.90f), 1.0f);
+        }
+
+        ui_->end();
+        glfwSwapBuffers(win_);
+        glfwPollEvents();
+    }
+
+private:
+    int w_ = 0;
+    int h_ = 0;
+    GLFWwindow* win_ = nullptr;
+    std::unique_ptr<globe::UiContext> ui_;
+    std::unique_ptr<globe::Texture> bg_;
+};
+
 } // namespace
 
 int main() {
@@ -113,18 +245,80 @@ int main() {
         globe::Settings settings = globe::Settings::load(settingsPath);
         std::fprintf(stderr, "[settings] %s\n", settingsPath.c_str());
 
-        globe::Window window(settings.windowWidth, settings.windowHeight,
-                             "Globe - Satellite Visualizer");
-
         // Locate assets. In a packaged build they sit next to the executable
         // (assets/ beside globe.exe); for dev runs launched from the build dir
         // that folder won't exist, so fall back to the source tree baked in at
-        // compile time (GLOBE_ASSETS_DIR).
+        // compile time (GLOBE_ASSETS_DIR). Resolved before any window exists; it
+        // only needs the executable's own path.
         std::string assets = globe::exeDir() + "/assets";
         if (!std::filesystem::exists(std::filesystem::path(assets) / "shaders" / "earth.vert")) {
             assets = GLOBE_ASSETS_DIR;
         }
         std::fprintf(stderr, "[assets] %s\n", assets.c_str());
+
+        // Data sources (plain CPU objects, no GL): the satellite catalog, SATCAT
+        // metadata, and the city gazetteer. Loaded below while the splash is up,
+        // and they outlive it into the main viewer.
+        // Live TLEs from CelesTrak with a 6h disk cache and bundled fallback;
+        // Starlink is capped so the live feed (thousands) stays a curated sample.
+        const std::string cacheDir = globe::userCacheDir("globe");
+        std::fprintf(stderr, "[cache] %s\n", cacheDir.c_str());
+        const std::string gp = "https://celestrak.org/NORAD/elements/gp.php?GROUP=";
+        struct Feed { globe::TleGroup group; int cap; glm::vec3 color; const char* label; };
+        const std::vector<Feed> feeds = {
+            {{"stations", gp + "stations&FORMAT=tle", assets + "/data/stations.tle"}, 0,
+             {1.00f, 0.82f, 0.25f}, "Stations"},
+            {{"gps-ops",  gp + "gps-ops&FORMAT=tle",  assets + "/data/gps-ops.tle"}, 0,
+             {0.45f, 0.90f, 0.55f}, "GPS"},
+            {{"starlink", gp + "starlink&FORMAT=tle", assets + "/data/starlink-sample.tle"}, 60,
+             {1.00f, 0.50f, 0.35f}, "Starlink"},
+        };
+        globe::SatelliteCatalog catalog;
+        globe::Satcat satcat;
+        globe::Gazetteer gazetteer;
+
+        // Splash window (small, borderless, centered) shown while the possibly
+        // slow first-run fetch + parse runs. Its own GL context; closed before
+        // the main window opens.
+        {
+            Splash splash(assets, 612, 383);
+            splash.show(GLOBE_VERSION, "Loading satellites...");
+
+            int loaded = 0;
+            for (std::size_t i = 0; i < feeds.size(); ++i) {
+                loaded += catalog.loadTleFile(globe::resolveTleFile(feeds[i].group, cacheDir),
+                                              feeds[i].cap, static_cast<int>(i));
+            }
+            std::fprintf(stderr, "[catalog] loaded %d satellites\n", loaded);
+
+            // SATCAT metadata (country / type / launch), one CSV per feed group,
+            // keyed by NORAD id. Best-effort; weekly cache.
+            for (const auto& f : feeds) {
+                satcat.loadCsv(globe::resolveSatcatFile(f.group.name, cacheDir));
+            }
+            std::fprintf(stderr, "[satcat] %zu records\n", satcat.size());
+
+            // Bundled GeoNames city dump for the F2 location search (optional:
+            // if absent, the picker falls back to manual lat/lon entry).
+            gazetteer.load(assets + "/data/cities15000.txt");
+
+            // Hold the splash briefly so it's readable even on a fast warm start.
+            const double readyStart = glfwGetTime();
+            while (glfwGetTime() - readyStart < 1.8) {
+                splash.show(GLOBE_VERSION, "");
+            }
+        } // splash window closes here
+
+        // Main window and its GL resources (its own context, created after the
+        // splash is gone).
+        globe::Window window(settings.windowWidth, settings.windowHeight,
+                             "Globe - Satellite Visualizer");
+        // Paint one dark frame so the new window doesn't flash white before the
+        // first real render.
+        glClearColor(0.02f, 0.03f, 0.06f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        window.swapBuffers();
+
         globe::Shader earthShader(assets + "/shaders/earth.vert", assets + "/shaders/earth.frag");
         globe::Shader markerShader(assets + "/shaders/marker.vert", assets + "/shaders/marker.frag");
         globe::Shader trackShader(assets + "/shaders/track.vert", assets + "/shaders/track.frag");
@@ -141,60 +335,6 @@ int main() {
         globe::UiContext ui(assets);
         globe::SatelliteList satList; // searchable catalog panel (right edge)
         globe::LocationPicker picker; // F2 location chooser (city search / lat,lon)
-
-        // Draw one frame before loading data, so the window shows a message
-        // instead of a blank/white flash while the first fetch + parse runs.
-        {
-            glClearColor(0.02f, 0.03f, 0.06f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            ui.begin(window.width(), window.height());
-            const std::string msg = "Loading satellites...";
-            ui.drawText((static_cast<float>(window.width()) - ui.textWidth(msg)) * 0.5f,
-                        static_cast<float>(window.height()) * 0.5f - ui.lineHeight(),
-                        msg, glm::vec4(0.9f, 0.93f, 1.0f, 1.0f));
-            ui.end();
-            window.swapBuffers();
-            window.pollEvents();
-        }
-
-        // Live TLEs from CelesTrak with a 6h disk cache and bundled fallback.
-        // Cache lives in a fixed per-user dir (not the working directory).
-        // Starlink is capped so the live feed (thousands) stays a curated sample.
-        const std::string cacheDir = globe::userCacheDir("globe");
-        std::fprintf(stderr, "[cache] %s\n", cacheDir.c_str());
-        const std::string gp = "https://celestrak.org/NORAD/elements/gp.php?GROUP=";
-        struct Feed { globe::TleGroup group; int cap; glm::vec3 color; const char* label; };
-        const std::vector<Feed> feeds = {
-            {{"stations", gp + "stations&FORMAT=tle", assets + "/data/stations.tle"}, 0,
-             {1.00f, 0.82f, 0.25f}, "Stations"},
-            {{"gps-ops",  gp + "gps-ops&FORMAT=tle",  assets + "/data/gps-ops.tle"}, 0,
-             {0.45f, 0.90f, 0.55f}, "GPS"},
-            {{"starlink", gp + "starlink&FORMAT=tle", assets + "/data/starlink-sample.tle"}, 60,
-             {1.00f, 0.50f, 0.35f}, "Starlink"},
-        };
-
-        globe::SatelliteCatalog catalog;
-        int loaded = 0;
-        for (std::size_t i = 0; i < feeds.size(); ++i) {
-            loaded += catalog.loadTleFile(globe::resolveTleFile(feeds[i].group, cacheDir),
-                                          feeds[i].cap, static_cast<int>(i));
-        }
-        std::fprintf(stderr, "[catalog] loaded %d satellites\n", loaded);
-
-        // SATCAT metadata (country / type / launch date), one CSV per feed group,
-        // keyed by NORAD id. Best-effort: if it can't be fetched, the panel just
-        // omits those fields. Weekly cache (it changes slowly).
-        globe::Satcat satcat;
-        for (const auto& f : feeds) {
-            satcat.loadCsv(globe::resolveSatcatFile(f.group.name, cacheDir));
-        }
-        std::fprintf(stderr, "[satcat] %zu records\n", satcat.size());
-
-        // Gazetteer of world cities for the location search (bundled GeoNames
-        // dump). Optional: if the file isn't present, the picker falls back to
-        // manual lat/lon entry. See assets/data/README.
-        globe::Gazetteer gazetteer;
-        gazetteer.load(assets + "/data/cities15000.txt");
         picker.setGazetteer(&gazetteer);
 
         glEnable(GL_PROGRAM_POINT_SIZE);
@@ -234,6 +374,8 @@ int main() {
         std::vector<globe::Pass> passes;
         int passesIndex = -1;
         double passesCalcTime = 0.0;
+
+        lastTime = glfwGetTime(); // reset dt after setup so the first frame isn't a jump
 
         while (!window.shouldClose()) {
             window.pollEvents();

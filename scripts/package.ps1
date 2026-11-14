@@ -59,13 +59,24 @@ $aStage = Join-Path $stage "assets"
 New-Item -ItemType Directory -Path (Join-Path $aStage "shaders")  -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $aStage "textures") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $aStage "data")     -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $aStage "fonts")    -Force | Out-Null
 
 Copy-Item (Join-Path $repo "assets/shaders/*.vert")  (Join-Path $aStage "shaders")
 Copy-Item (Join-Path $repo "assets/shaders/*.frag")  (Join-Path $aStage "shaders")
-# Only the PNG the app actually loads (skip the large .tif source textures).
+# Only the images the app actually loads (skip the large .tif source textures):
+# the globe's Blue Marble map and the splash photo.
 Copy-Item (Join-Path $repo "assets/textures/1280px-Blue_Marble_2002.png") (Join-Path $aStage "textures")
+Copy-Item (Join-Path $repo "assets/textures/startsplashscreen.jpg")       (Join-Path $aStage "textures")
 Copy-Item (Join-Path $repo "assets/data/*.tle")      (Join-Path $aStage "data")
 Copy-Item (Join-Path $repo "assets/data/README.md")  (Join-Path $aStage "data")
+# The UI font the app actually loads (JetBrains Mono Regular, OFL) + its license.
+Copy-Item (Join-Path $repo "assets/fonts/JetBrainsMono-Regular.ttf") (Join-Path $aStage "fonts")
+$ofl = Join-Path $repo "assets/fonts/OFL.txt"
+if (Test-Path $ofl) {
+    Copy-Item $ofl (Join-Path $aStage "fonts")
+} else {
+    Write-Warning "assets/fonts/OFL.txt not found - add JetBrains Mono's OFL license file (required to redistribute the font)."
+}
 
 # GeoNames city gazetteer (not in git; needed for the location search). If it's
 # missing the app falls back to manual lat/lon entry, so warn but don't fail.

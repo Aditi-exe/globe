@@ -56,10 +56,11 @@ TextRenderer::TextRenderer(const std::string& assetsDir, float pixelHeight)
     impl_->pixelHeight = pixelHeight;
     impl_->baseline = pixelHeight * 0.78f;
 
-    // Prefer a bundled font; fall back to common Windows fonts for local dev.
-    // TODO: bundle an OFL/Apache font in assets/fonts/ui.ttf before release
-    // (system fonts here are dev-only and must not be redistributed).
+    // Prefer the bundled JetBrains Mono (OFL, redistributable); ui.ttf is a
+    // generic override slot; the Windows fonts are dev-only fallbacks (not
+    // redistributable) for when the bundled asset isn't present.
     const std::string candidates[] = {
+        assetsDir + "/fonts/JetBrainsMono-Regular.ttf",
         assetsDir + "/fonts/ui.ttf",
         "C:/Windows/Fonts/segoeui.ttf",
         "C:/Windows/Fonts/consola.ttf",
@@ -138,13 +139,16 @@ float TextRenderer::measure(const std::string& text) const {
 }
 
 void TextRenderer::draw(const glm::mat4& proj, float x, float y,
-                        const std::string& text, const glm::vec4& color) const {
+                        const std::string& text, const glm::vec4& color, float scale) const {
     if (!impl_->ready || text.empty()) {
         return;
     }
 
-    float penX = x;
-    float penY = y + impl_->baseline; // stb positions glyphs on the baseline
+    // Lay the glyphs out in a local space anchored at (0,0) top-left, then scale
+    // about that corner and translate to (x,y). This keeps scaling independent
+    // of where on screen the text lands.
+    float penX = 0.0f;
+    float penY = impl_->baseline; // stb positions glyphs on the baseline
     std::vector<float> verts;
     verts.reserve(text.size() * 24); // 6 verts * 4 floats per glyph
 
@@ -155,10 +159,14 @@ void TextRenderer::draw(const glm::mat4& proj, float x, float y,
         stbtt_aligned_quad q;
         stbtt_GetBakedQuad(impl_->cdata, kAtlasW, kAtlasH, c - kFirstChar,
                            &penX, &penY, &q, 1);
+        const float x0 = x + q.x0 * scale;
+        const float y0 = y + q.y0 * scale;
+        const float x1 = x + q.x1 * scale;
+        const float y1 = y + q.y1 * scale;
         const float quad[6][4] = {
-            {q.x0, q.y0, q.s0, q.t0}, {q.x1, q.y0, q.s1, q.t0},
-            {q.x1, q.y1, q.s1, q.t1}, {q.x0, q.y0, q.s0, q.t0},
-            {q.x1, q.y1, q.s1, q.t1}, {q.x0, q.y1, q.s0, q.t1},
+            {x0, y0, q.s0, q.t0}, {x1, y0, q.s1, q.t0},
+            {x1, y1, q.s1, q.t1}, {x0, y0, q.s0, q.t0},
+            {x1, y1, q.s1, q.t1}, {x0, y1, q.s0, q.t1},
         };
         for (const auto& v : quad) {
             verts.insert(verts.end(), {v[0], v[1], v[2], v[3]});

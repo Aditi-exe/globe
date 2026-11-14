@@ -25,8 +25,11 @@ public:
     [[nodiscard]] float measure(const std::string& text) const; // pixel width
 
     // Draw `text` with its top-left at (x, y) pixels, using the given ortho proj.
+    // `scale` enlarges (or shrinks) the baked glyphs about that top-left corner;
+    // 1.0 is the native baked size. Scaling up is bilinear-filtered, so keep it
+    // modest for crisp text.
     void draw(const glm::mat4& proj, float x, float y,
-              const std::string& text, const glm::vec4& color) const;
+              const std::string& text, const glm::vec4& color, float scale = 1.0f) const;
 
 private:
     struct Impl;
